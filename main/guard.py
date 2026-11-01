@@ -417,25 +417,53 @@ def fix_description_item(
     srt_path = os.path.join(temp_dir, "transcript.srt")
     out_desc_path = os.path.join(transcripts_dir, "description.json")
 
+    def get_archive_proxy_url(u: str) -> Optional[str]:
+        archive_prefix = "https://archive.org/download/"
+        if u and u.startswith(archive_prefix):
+            subpath = u[len(archive_prefix):]
+            proxy_base = os.environ.get("CF_WORKER_PROXY_URL") or "https://voiceoftrisma.anandapradnyana68.workers.dev/archive/download"
+            return f"{proxy_base.rstrip('/')}/{subpath}"
+        return None
+
     try:
-        log(f"Mengunduh transkrip dari: {srt_url}")
-        req = urllib.request.Request(srt_url, headers={"User-Agent": USER_AGENT})
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp, open(srt_path, "wb") as out_file:
-                shutil.copyfileobj(resp, out_file)
-            log(f"Transkrip berhasil diunduh ke: {srt_path} ({os.path.getsize(srt_path)} bytes)")
-        except Exception as e:
-            log(f"[WARN] Gagal mengunduh {srt_url}: {e}")
-            txt_url = f"https://archive.org/download/{item_id}/transcript.txt"
-            log(f"Mencoba alternatif: {txt_url}")
+        download_candidates = []
+        proxy_srt = get_archive_proxy_url(srt_url)
+        if proxy_srt:
+            download_candidates.append(proxy_srt)
+        download_candidates.append(srt_url)
+
+        downloaded = False
+        for u in download_candidates:
             try:
-                req_txt = urllib.request.Request(txt_url, headers={"User-Agent": USER_AGENT})
-                with urllib.request.urlopen(req_txt, timeout=30) as resp, open(srt_path, "wb") as out_file:
+                log(f"Mengunduh transkrip dari: {u}")
+                req = urllib.request.Request(u, headers={"User-Agent": USER_AGENT})
+                with urllib.request.urlopen(req, timeout=30) as resp, open(srt_path, "wb") as out_file:
                     shutil.copyfileobj(resp, out_file)
-                log(f"Transcript TXT berhasil diunduh ke: {srt_path}")
-            except Exception as e2:
-                log(f"[FATAL] Gagal mengunduh alternatif transkrip: {e2}")
-                sys.exit(1)
+                log(f"Transkrip berhasil diunduh ke: {srt_path} ({os.path.getsize(srt_path)} bytes)")
+                downloaded = True
+                break
+            except Exception as e:
+                log(f"[WARN] Gagal mengunduh {u}: {e}")
+
+        if not downloaded:
+            txt_url = f"https://archive.org/download/{item_id}/transcript.txt"
+            proxy_txt = get_archive_proxy_url(txt_url)
+            txt_candidates = [proxy_txt, txt_url] if proxy_txt else [txt_url]
+            for tu in txt_candidates:
+                try:
+                    log(f"Mencoba alternatif: {tu}")
+                    req_txt = urllib.request.Request(tu, headers={"User-Agent": USER_AGENT})
+                    with urllib.request.urlopen(req_txt, timeout=30) as resp, open(srt_path, "wb") as out_file:
+                        shutil.copyfileobj(resp, out_file)
+                    log(f"Transcript TXT berhasil diunduh ke: {srt_path}")
+                    downloaded = True
+                    break
+                except Exception as e2:
+                    log(f"[WARN] Gagal mengunduh alternatif {tu}: {e2}")
+
+        if not downloaded:
+            log(f"[FATAL] Gagal mengunduh transkrip untuk {item_id}.")
+            sys.exit(1)
 
         if dry_run:
             log("[DRY-RUN] Melewati eksekusi Gemini descriptor dan upload.")

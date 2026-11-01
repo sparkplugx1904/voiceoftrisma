@@ -120,8 +120,10 @@ def run_ffmpeg(url, suffix="", position=0, no_upload=False):
         if proxies:
             log(f"[PROXY-OK] Stream menggunakan proxy: {proxy_module.SELECTED_PROXY}")
 
+        session = requests.Session()
+        session.trust_env = False
         try:
-            with requests.get(
+            with session.get(
                 url,
                 headers=headers,
                 proxies=proxies,
@@ -162,18 +164,16 @@ def run_ffmpeg(url, suffix="", position=0, no_upload=False):
             ConnectionError,
             OSError,
         ) as e:
-            log(f"[WARN] Koneksi stream terputus: {type(e).__name__}. Mencari proxy pengganti...")
-
-            use_proxy_for_stream = False
-            if ARGS:
-                if ARGS.proxy or getattr(ARGS, "random_proxy", None) in ["stream", "all"]:
-                    use_proxy_for_stream = True
-
             if use_proxy_for_stream:
+                log(f"[WARN] Koneksi stream terputus: {type(e).__name__}. Mencari proxy pengganti...")
                 proxy_module.next_proxy_parallel_from_pool()
+            else:
+                log(f"[WARN] Koneksi stream terputus: {type(e).__name__}. Mencoba menghubungkan kembali dalam 2 detik...")
 
             time.sleep(2)
             continue
+        finally:
+            session.close()
 
     log("[DONE] Menutup pipe ke FFmpeg — menunggu FFmpeg menyelesaikan muxing...")
     try:

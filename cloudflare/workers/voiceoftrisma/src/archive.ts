@@ -117,6 +117,90 @@ async function handleArchive(request: Request, env: Env): Promise<Response> {
 	);
 }
 
+/* GET /archive/download/:path+ — Reverse proxy download file dari Archive.org */
+async function handleArchiveDownload(request: Request, _env: Env): Promise<Response> {
+	const url = new URL(request.url);
+	let subpath = "";
+	if (url.pathname.startsWith("/archive/download/")) {
+		subpath = url.pathname.slice("/archive/download/".length);
+	} else if (url.pathname.startsWith("/download/")) {
+		subpath = url.pathname.slice("/download/".length);
+	}
+
+	if (!subpath) {
+		return json({ error: "Missing archive path." }, 400);
+	}
+
+	const targetUrl = `https://archive.org/download/${subpath}${url.search}`;
+
+	const reqHeaders = new Headers();
+	const range = request.headers.get("Range");
+	if (range) {
+		reqHeaders.set("Range", range);
+	}
+	reqHeaders.set("User-Agent", request.headers.get("User-Agent") || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+	reqHeaders.set("Accept", "*/*");
+
+	let upstream: Response | null = null;
+	const maxRetries = 2;
+
+	for (let attempt = 0; attempt <= maxRetries; attempt++) {
+		try {
+			upstream = await fetch(targetUrl, {
+				method: request.method,
+				headers: reqHeaders,
+				redirect: "follow",
+			});
+
+			if (upstream.status < 500 || attempt === maxRetries) {
+				break;
+			}
+		} catch (err) {
+			if (attempt === maxRetries) {
+				return json({ error: "Proxy fetch failed", message: String(err) }, 502);
+			}
+		}
+		const { promise, resolve } = Promise.withResolvers<void>();
+		setTimeout(resolve, 1000);
+		await promise;
+	}
+
+	if (!upstream) {
+		return json({ error: "Proxy fetch failed" }, 502);
+	}
+
+	const resHeaders = new Headers();
+	const passHeaders = [
+		"content-type",
+		"content-length",
+		"content-range",
+		"accept-ranges",
+		"content-disposition",
+		"etag",
+		"last-modified",
+		"cache-control",
+	];
+	for (const h of passHeaders) {
+		const val = upstream.headers.get(h);
+		if (val !== null) {
+			resHeaders.set(h, val);
+		}
+	}
+
+	resHeaders.set("Access-Control-Allow-Origin", "*");
+	resHeaders.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+
+	return new Response(upstream.body, {
+		status: upstream.status,
+		statusText: upstream.statusText,
+		headers: resHeaders,
+	});
+}
+
 export const archiveRoutes: Route[] = [
 	{ method: "GET", pattern: "/archive", handler: handleArchive },
+	{ method: "GET", pattern: "/archive/download/:path+", handler: handleArchiveDownload },
+	{ method: "HEAD", pattern: "/archive/download/:path+", handler: handleArchiveDownload },
+	{ method: "GET", pattern: "/download/:path+", handler: handleArchiveDownload },
+	{ method: "HEAD", pattern: "/download/:path+", handler: handleArchiveDownload },
 ];

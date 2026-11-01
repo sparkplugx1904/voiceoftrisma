@@ -92,7 +92,7 @@ def find_working_proxy() -> Optional[str]:
     def _fetch_source(args):
         idx, source_url = args
         try:
-            req = requests.get(source_url, timeout=10, headers=get_headers())
+            req = requests.get(source_url, timeout=10, headers=get_headers(), proxies={"http": None, "https": None})
             if req.status_code == 200:
                 lines = [p.strip() for p in req.text.strip().split("\n") if p.strip()]
                 if lines:

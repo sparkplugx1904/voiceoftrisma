@@ -18,6 +18,7 @@ https://voiceoftrisma.anandapradnyana68.workers.dev
 ├── /              --> Status layanan & daftar endpoint
 ├── /stats         --> Proxy CORS live status Klikhost & time-series 6 jam D1
 ├── /archive       --> Cache katalog rekaman siaran dari Archive.org
+├── /archive/download/* --> Reverse proxy download audio/file Archive.org (anti 502/rate-limit GHA)
 ├── /metrics       --> Snapshot statistik pendengar (aktif jam 15:00-19:00 WITA)
 └── /api/*         --> Backend Admin & Pengelolaan Jadwal Siaran
     ├── /api/login   (Otentikasi admin via SESSION_SECRET HMAC)

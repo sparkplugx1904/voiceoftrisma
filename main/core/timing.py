@@ -151,7 +151,7 @@ def wait_for_stream(url: str, args=None):
                 if getattr(args, "random_proxy", None) in ["stats", "all"]:
                     use_proxy_for_stats = True
 
-            stats_proxy = proxy_module.get_proxies_dict(proxy_module.SELECTED_PROXY) if use_proxy_for_stats else None
+            stats_proxy = proxy_module.get_proxies_dict(proxy_module.SELECTED_PROXY) if use_proxy_for_stats else {"http": None, "https": None}
 
             response = requests.get(
                 target_stats,

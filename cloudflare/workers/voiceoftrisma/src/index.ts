@@ -27,7 +27,7 @@ function handleRoot(_request: Request, _env: Env): Response {
 	return json({
 		ok: true,
 		service: "voiceoftrisma",
-		endpoints: ["/api/*", "/stats", "/archive", "/metrics"],
+		endpoints: ["/api/*", "/stats", "/archive", "/archive/download/*", "/metrics"],
 		time: new Date().toISOString(),
 	});
 }

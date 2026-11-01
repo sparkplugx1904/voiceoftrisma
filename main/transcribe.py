@@ -140,7 +140,12 @@ def download_file(url: str, dest: Path) -> bool:
     os.makedirs(dest.parent, exist_ok=True)
     try:
         subprocess.run(
-            ["curl", "-f", "-L", "-o", str(dest), "-m", "600", url],
+            [
+                "curl", "-f", "-L", "-o", str(dest), "-m", "600",
+                "--retry", "3", "--retry-delay", "2",
+                "-A", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                url
+            ],
             check=True
         )
         print()
@@ -155,7 +160,6 @@ def download_file(url: str, dest: Path) -> bool:
     except Exception as e:
         log_error(f"Terjadi error tak terduga saat mengunduh: {e}", exit_app=False)
         return False
-
 def ensure_model_exists(model_name: str, custom_model_url: Optional[str]) -> Path:
     """Memastikan model GGML/GGUF ada di folder ./models/."""
     
@@ -202,8 +206,33 @@ def ensure_model_exists(model_name: str, custom_model_url: Optional[str]) -> Pat
             
         return model_path
 
+ARCHIVE_DOWNLOAD_PREFIX = "https://archive.org/download/"
+DEFAULT_WORKER_PROXY = "https://voiceoftrisma.anandapradnyana68.workers.dev/archive/download"
+
+
+def get_archive_proxy_url(url: str) -> Optional[str]:
+    """Ubah URL archive.org/download/... menjadi URL reverse proxy Cloudflare Worker."""
+    if url.startswith(ARCHIVE_DOWNLOAD_PREFIX):
+        subpath = url[len(ARCHIVE_DOWNLOAD_PREFIX):]
+        proxy_base = os.environ.get("CF_WORKER_PROXY_URL") or DEFAULT_WORKER_PROXY
+        return f"{proxy_base.rstrip('/')}/{subpath}"
+    return None
+
+
 def download_audio(url: str, output_path: Path):
-    """Wrapper untuk mengunduh file audio."""
+    """
+    Wrapper untuk mengunduh file audio.
+    Mencoba via reverse proxy Cloudflare Worker terlebih dahulu untuk menghindari blokir/502
+    jaringan datacenter GitHub Actions oleh Archive.org, lalu fallback ke URL asli jika gagal.
+    """
+    proxy_url = get_archive_proxy_url(url)
+    if proxy_url:
+        log_info(f"Mengunduh audio via Cloudflare Worker proxy: {proxy_url}")
+        if download_file(proxy_url, output_path):
+            log_success(f"Audio berhasil diunduh via proxy ke {output_path}")
+            return
+        log_warn(f"Gagal via Cloudflare Worker proxy. Mencoba URL asli Archive.org: {url}")
+
     log_info(f"Mengunduh audio dari: {url}")
     if not download_file(url, output_path):
         log_error("Gagal mengunduh audio. Membatalkan.", exit_app=True)

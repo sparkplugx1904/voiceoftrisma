@@ -26,6 +26,7 @@
 	"main": "src/index.ts",
 	"compatibility_date": "2026-05-02",
 	"compatibility_flags": ["nodejs_compat"],
+	"workers_dev": true,
 	"durable_objects": {
 		"bindings": [
 			{
