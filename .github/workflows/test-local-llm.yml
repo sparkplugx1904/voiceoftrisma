@@ -86,9 +86,9 @@ jobs:
           fi
           echo "[ INFO ] Membersihkan transkrip dengan main/clean.py..."
           python3 main/clean.py transcripts/transcript.srt > clean.txt
-          echo "[ OK ] clean.txt selesai dibuat ($(wc -l < clean.txt) baris)."
-          echo "=== 30 Baris Pertama clean.txt ==="
-          head -n 30 clean.txt
+          echo "[ OK ] clean.txt selesai dibuat: $(wc -l < clean.txt) baris (seluruh durasi siaran ~2 jam penuh)."
+          echo "Rentang awal transkrip : $(head -n 1 clean.txt | cut -c 1-90)..."
+          echo "Rentang akhir transkrip: $(tail -n 1 clean.txt | cut -c 1-90)..."
 
       # ── 4. Jalankan llama-server di Background ──────────────────────────────
       - name: Start Llama Server
