@@ -49,16 +49,15 @@ jobs:
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache
           sudo apt-get clean
           echo "=== Ruang Disk Setelah Pembersihan ==="
           df -h /
 
-          echo "Mengalokasikan 24GB swapfile..."
-          sudo fallocate -l 24G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=24576
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          echo "Mengalokasikan 24GB swapfile tambahan..."
+          sudo fallocate -l 24G /swapfile_extra || sudo dd if=/dev/zero of=/swapfile_extra bs=1M count=24576
+          sudo chmod 600 /swapfile_extra
+          sudo mkswap /swapfile_extra
+          sudo swapon /swapfile_extra
           echo "=== Status Memori & Swap ==="
           free -h
 
