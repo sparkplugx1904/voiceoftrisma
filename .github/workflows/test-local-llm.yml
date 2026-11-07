@@ -103,6 +103,8 @@ jobs:
           nohup ./bin/linux-x64/llama-server \
             -m "$MODEL_PATH" \
             -c "$CTX_SIZE" \
+            -b 512 \
+            -ub 256 \
             -t $(nproc) \
             --jinja \
             --chat-template-kwargs '{"enable_thinking":false}' \

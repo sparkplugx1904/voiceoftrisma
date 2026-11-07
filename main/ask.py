@@ -44,38 +44,8 @@ req = urllib.request.Request(
     {"Content-Type": "application/json"}
 )
 
-parsed_url = urlparse(server_url)
-slots_url = f"{parsed_url.scheme}://{parsed_url.netloc}/slots"
-
-# Thread pemantau proses prompt evaluation sebelum token pertama keluar
-stop_monitor = threading.Event()
-
-def monitor_slots():
-    start_time = time.time()
-    while not stop_monitor.wait(5):
-        elapsed = int(time.time() - start_time)
-        state_desc = "Sedang mengevaluasi prompt di CPU (RAM+Swap)..."
-        try:
-            req_s = urllib.request.Request(slots_url, headers={"User-Agent": "AskMonitor"})
-            with urllib.request.urlopen(req_s, timeout=3) as r:
-                slots = json.loads(r.read().decode())
-                if slots and isinstance(slots, list):
-                    s0 = slots[0]
-                    state = s0.get("state", 0)
-                    n_prompt = s0.get("n_prompt_tokens", 0)
-                    n_decoded = s0.get("n_decoded", 0)
-                    if state == 1:
-                        state_desc = f"Mencerna prompt ({n_prompt} token)"
-                    elif state == 2:
-                        state_desc = f"Menghasilkan token ({n_decoded} token)"
-        except Exception:
-            pass
-        print(f"[PROGRES {elapsed:>3}s] {state_desc}", flush=True)
-
-monitor_thread = threading.Thread(target=monitor_slots, daemon=True)
-monitor_thread.start()
-
 print("[ INFO ] Mengirim request ke llama-server...", flush=True)
+print("[ INFO ] Menunggu pemrosesan prompt di CPU... Token JSON akan langsung mengalir di bawah begitu inferensi dimulai:\n", flush=True)
 collected = []
 first_token = False
 
@@ -98,7 +68,6 @@ try:
                         if chunk:
                             if not first_token:
                                 first_token = True
-                                stop_monitor.set()
                                 print("\n" + "=" * 65, flush=True)
                                 print("[ LIVE STREAM ] Token mulai dihasilkan:", flush=True)
                                 print("=" * 65, flush=True)
@@ -106,8 +75,8 @@ try:
                             collected.append(chunk)
                 except Exception:
                     pass
-finally:
-    stop_monitor.set()
+except Exception as e:
+    print(f"\n[ERROR] Koneksi atau inferensi gagal: {e}", flush=True)
 
 full_text = "".join(collected)
 with open(out_file, "w", encoding="utf-8") as f:
