@@ -1,11 +1,12 @@
 name: Pipeline Guard
 
 on:
-  schedule:
-    # Transcribe only: tiap 6 jam (WITA 00:00, 06:00, 12:00, 18:00 = UTC 16:00, 22:00, 04:00, 10:00)
-    - cron: "0 4,10,16,22 * * *"
-    # Describe only: tiap 1 jam sekali (menit 30 agar terpisah dan tidak bertabrakan dengan transcribe)
-    - cron: "30 * * * *"
+  # Jadwal cron internal GHA dinonaktifkan — dialihkan ke Cloudflare Worker cron trigger (0 * * * *)
+  # schedule:
+  #   # Transcribe only: tiap 6 jam (WITA 00:00, 06:00, 12:00, 18:00 = UTC 16:00, 22:00, 04:00, 10:00)
+  #   - cron: "0 4,10,16,22 * * *"
+  #   # Describe only: tiap 1 jam sekali (menit 30 agar terpisah dan tidak bertabrakan dengan transcribe)
+  #   - cron: "30 * * * *"
   workflow_dispatch:
     inputs:
       limit:
@@ -49,9 +50,9 @@ on:
 permissions:
   contents: read
 
-# Satu run per jenis jadwal; run baru menunggu yang lama selesai
+# Satu run per mode (transcribe_only vs describe_only); run baru menunggu yang lama selesai
 concurrency:
-  group: pipeline-guard-${{ github.event_name == 'schedule' && (contains(github.event.schedule, '4,10,16,22') && 'transcribe' || 'describe') || github.run_id }}
+  group: pipeline-guard-${{ inputs.mode || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -90,25 +91,17 @@ jobs:
           MAX_SCAN="${INPUT_MAX_SCAN:-100}"
 
           # Penentuan mode & limit:
-          # - Jika schedule: tentukan murni dari cron yang memicu
-          # - Jika workflow_dispatch: gunakan input dari user
-          if [ "$EVENT_NAME" = "schedule" ]; then
-            if [ "$SCHEDULE" = "0 4,10,16,22 * * *" ]; then
-              MODE="transcribe_only"
-              LIMIT=10
-            else
-              MODE="describe_only"
-              LIMIT=5
-            fi
+          # - transcribe_only: 10 worker paralel
+          # - describe_only: 5 worker paralel
+          MODE="${INPUT_MODE:-auto}"
+          if [ -n "$INPUT_LIMIT" ]; then
+            LIMIT="$INPUT_LIMIT"
+          elif [ "$MODE" = "transcribe_only" ]; then
+            LIMIT=10
+          elif [ "$MODE" = "describe_only" ]; then
+            LIMIT=5
           else
-            MODE="${INPUT_MODE:-auto}"
-            if [ -n "$INPUT_LIMIT" ]; then
-              LIMIT="$INPUT_LIMIT"
-            elif [ "$MODE" = "transcribe_only" ]; then
-              LIMIT=10
-            else
-              LIMIT=5
-            fi
+            LIMIT=5
           fi
           echo "Event: $EVENT_NAME | Mode: $MODE | Limit: $LIMIT | Max scan: $MAX_SCAN"
 

@@ -3,6 +3,7 @@ import { beforeAll, describe, it, expect } from "vitest";
 import { adminRoutes } from "../src/admin";
 import { verifyToken, signToken, Env } from "../src/shared";
 import { rateLimited, RL_WINDOW_MS } from "../src/index";
+import { triggerPipelineGuard } from "../src/workflow";
 
 const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
 
@@ -371,5 +372,11 @@ describe("router worker gabungan", () => {
 		// IP lain tidak terblok (bucket terpisah)
 		const other = await ns.get(ns.idFromName("testRateLimitUnit2")).fetch(q(3));
 		expect(((await other.json()) as { ok: boolean }).ok).toBe(true);
+	});
+
+	it("triggerPipelineGuard: mengembalikan error jika GITHUB_TOKEN tidak ada", async () => {
+		const res = await triggerPipelineGuard({ ...fakeEnv(), GITHUB_TOKEN: "" } as unknown as Env);
+		expect(res.ok).toBe(false);
+		expect(res.error).toBe("GITHUB_TOKEN missing");
 	});
 });

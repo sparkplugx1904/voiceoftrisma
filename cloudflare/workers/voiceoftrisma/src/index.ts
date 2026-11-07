@@ -18,7 +18,7 @@ import { adminRoutes } from "./admin";
 import { statsRoutes, recordSample } from "./stream-stats";
 import { archiveRoutes, updateArchiveCache } from "./archive";
 import { metricsRoutes, updateMetrics } from "./metrics";
-import { triggerWorkflows } from "./workflow";
+import { triggerWorkflows, triggerPipelineGuard } from "./workflow";
 import { RateLimitDO } from "./rate-limit";
 // Re-export WAJIB: tanpa ini class DO tidak ikut ter-bundle oleh wrangler.
 export { RateLimitDO };
@@ -150,9 +150,15 @@ export default {
 			case "0 7 * * *":
 				await triggerWorkflows(env);
 				break;
-			case "* * * * *":
+			case "* * * * *": {
 				await updateMetrics(env);
+				const now = new Date();
+				// Setiap pergantian jam (menit 00): trigger Pipeline Guard
+				if (now.getUTCMinutes() === 0) {
+					await triggerPipelineGuard(env);
+				}
 				break;
+			}
 			default:
 				console.error("Cron tidak dikenal:", event.cron);
 		}
