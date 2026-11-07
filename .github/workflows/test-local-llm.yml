@@ -133,7 +133,7 @@ jobs:
       - name: Run Inference (ask.py)
         run: |
           echo "[ INFO ] Mengirim prompt dan clean.txt ke llama-server..."
-          python3 main/ask.py main/prompt.txt clean.txt out.json http://127.0.0.1:8080/v1/chat/completions
+          python3 -u main/ask.py main/prompt.txt clean.txt out.json http://127.0.0.1:8080/v1/chat/completions
           echo "=== Hasil out.json ==="
           cat out.json
 
