@@ -3,4 +3,3 @@ ffprobe filter=lfs diff=lfs merge=lfs -text
 ffmpeg.exe filter=lfs diff=lfs merge=lfs -text
 ffprobe.exe filter=lfs diff=lfs merge=lfs -text
 *.bin filter=lfs diff=lfs merge=lfs -text
-bin/linux-x64/llama-* filter=lfs diff=lfs merge=lfs -text
