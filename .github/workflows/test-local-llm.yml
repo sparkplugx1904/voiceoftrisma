@@ -12,13 +12,13 @@ on:
         required: false
         default: "Qwen3.8-27B-UD-Q4_K_XL.gguf"
       sample_item:
-        description: "Archive.org Item ID untuk mengambil transkrip sampel"
+        description: "Archive.org Item ID untuk mengambil transkrip sampel (Jumat: vot-denpasar-20261106-183004, Sabtu: vot-denpasar-20261031-183004)"
         required: false
-        default: "vot-denpasar-20261008-183012"
+        default: "vot-denpasar-20261106-183004"
       context_size:
         description: "Kapasitas context size (tokens)"
         required: false
-        default: "16384"
+        default: "32768"
 
 permissions:
   contents: read
