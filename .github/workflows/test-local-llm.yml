@@ -18,7 +18,7 @@ on:
       context_size:
         description: "Kapasitas context size (tokens)"
         required: false
-        default: "32768"
+        default: "16384"
 
 permissions:
   contents: read
@@ -38,20 +38,12 @@ jobs:
         with:
           python-version: "3.x"
 
-      # ── 1. Bebaskan disk space & aktifkan 24GB swap untuk model 27B ────────
-      - name: Free Disk Space & Configure 24GB Swap
+      # ── 1. Aktifkan 24GB Swap untuk Model 27B ──────────────────────────────
+      - name: Configure 24GB Swap
         run: |
-          echo "=== Ruang Disk Sebelum Pembersihan ==="
+          echo "=== Ruang Disk Runner ==="
           df -h /
-          echo "Menghapus komponen bawaan runner yang tidak diperlukan..."
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo apt-get clean
-          echo "=== Ruang Disk Setelah Pembersihan ==="
-          df -h /
-
-          echo "Mengalokasikan 24GB swapfile tambahan..."
+          echo "Mengalokasikan 24GB swapfile tambahan secara instan..."
           sudo fallocate -l 24G /swapfile_extra || sudo dd if=/dev/zero of=/swapfile_extra bs=1M count=24576
           sudo chmod 600 /swapfile_extra
           sudo mkswap /swapfile_extra
@@ -59,16 +51,22 @@ jobs:
           echo "=== Status Memori & Swap ==="
           free -h
 
-      # ── 2. Download Model GGUF ──────────────────────────────────────────────
-      - name: Download GGUF Model
+      # ── 2. Download Model GGUF dengan aria2c (16 Koneksi Paralel) ──────────
+      - name: Download GGUF Model with aria2
         env:
           MODEL_URL: ${{ inputs.model_url }}
           MODEL_FILENAME: ${{ inputs.model_filename }}
         run: |
           mkdir -p "$HOME/qwen"
           MODEL_PATH="$HOME/qwen/$MODEL_FILENAME"
-          echo "[ INFO ] Mengunduh model GGUF dari $MODEL_URL ke $MODEL_PATH..."
-          curl -L -f --progress-bar -o "$MODEL_PATH" "$MODEL_URL"
+          echo "[ INFO ] Menginstal aria2..."
+          sudo apt-get update -qq && sudo apt-get install -y -qq aria2
+
+          echo "[ INFO ] Mengunduh model via aria2c (16 thread paralel)..."
+          aria2c -x 16 -s 16 -k 1M --file-allocation=none \
+            --summary-interval=5 --console-log-level=warn \
+            -d "$HOME/qwen" -o "$MODEL_FILENAME" "$MODEL_URL"
+
           echo "[ OK ] Download selesai:"
           ls -lh "$MODEL_PATH"
 
