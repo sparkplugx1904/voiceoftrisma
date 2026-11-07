@@ -192,7 +192,7 @@ def check_item_status(identifier: str, retries: int = 3) -> Dict:
 
 def scan_pipeline(
     limit: int = 5,
-    max_scan: int = 100,
+    max_scan: int = 1000,
     item_id: Optional[str] = None,
     mode: str = "auto",
     workers: int = 15
@@ -524,7 +524,7 @@ def main():
     # Subcommand: scan
     scan_parser = subparsers.add_parser("scan", help="Scan rekaman Archive.org untuk task matriks GitHub Actions")
     scan_parser.add_argument("--limit", type=int, default=5, help="Jumlah maksimal item yang diproses")
-    scan_parser.add_argument("--max-scan", type=int, default=100, help="Jumlah rekaman terbaru yang diperiksa")
+    scan_parser.add_argument("--max-scan", type=int, default=1000, help="Jumlah rekaman terbaru yang diperiksa (default: 1000)")
     scan_parser.add_argument("--item-id", type=str, default=None, help="Identifier spesifik yang ingin diperiksa")
     scan_parser.add_argument(
         "--mode",
@@ -537,7 +537,7 @@ def main():
 
     # Subcommand: status
     status_parser = subparsers.add_parser("status", help="Tampilkan laporan kesehatan arsip (dashboard ringkasan)")
-    status_parser.add_argument("--max-scan", type=int, default=50, help="Jumlah rekaman terbaru yang diperiksa (default: 50)")
+    status_parser.add_argument("--max-scan", type=int, default=1000, help="Jumlah rekaman terbaru yang diperiksa (default: 1000)")
     status_parser.add_argument("--json", action="store_true", help="Keluarkan hasil dalam format JSON murni")
 
     # Subcommand: fix-description

@@ -14,9 +14,9 @@ on:
         required: false
         default: ""
       max_scan:
-        description: "Jumlah rekaman terbaru yang diperiksa (default: 100)"
+        description: "Jumlah rekaman terbaru yang diperiksa (default: 1000)"
         required: false
-        default: "100"
+        default: "1000"
       item_id:
         description: "Archive.org Item ID tertentu (kosongkan jika scan otomatis)"
         required: false
@@ -88,7 +88,7 @@ jobs:
             ITEM_ARG="--item-id $INPUT_ITEM_ID"
           fi
 
-          MAX_SCAN="${INPUT_MAX_SCAN:-100}"
+          MAX_SCAN="${INPUT_MAX_SCAN:-1000}"
 
           # Penentuan mode & limit:
           # - transcribe_only: 10 worker paralel

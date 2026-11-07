@@ -96,7 +96,7 @@ export async function triggerPipelineGuard(
 	const mode = isTranscribeHour ? "transcribe_only" : "describe_only";
 	const limit = isTranscribeHour ? "10" : "5";
 
-	const result = await triggerWorkflow("pipeline-guard.yml", token, { mode, limit });
+	const result = await triggerWorkflow("pipeline-guard.yml", token, { mode, limit, max_scan: "1000" });
 	if (result.ok) {
 		console.log(`[ OK ] pipeline-guard.yml triggered (mode=${mode}, limit=${limit})`);
 	} else {
