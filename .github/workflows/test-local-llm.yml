@@ -14,7 +14,7 @@ on:
       sample_item:
         description: "Archive.org Item ID untuk mengambil transkrip sampel"
         required: false
-        default: "vot-denpasar-20261107-183013"
+        default: "vot-denpasar-20261008-183012"
       context_size:
         description: "Kapasitas context size (tokens)"
         required: false
@@ -30,10 +30,8 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Checkout Repository with Git LFS
+      - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          lfs: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -81,11 +79,13 @@ jobs:
         run: |
           mkdir -p transcripts
           echo "[ INFO ] Mengunduh transcript untuk item: $SAMPLE_ITEM..."
-          curl -L -f -s -o transcripts/transcript.srt "https://archive.org/download/$SAMPLE_ITEM/transcript.srt" || \
-          curl -L -f -s -o transcripts/transcript.srt "https://archive.org/download/$SAMPLE_ITEM/transcript.txt" || \
-          cp assets/sample_vot.txt transcripts/transcript.srt || \
-          printf "1\n00:00:00,000 --> 00:00:05,000\nVoice of Trisma online radio\n" > transcripts/transcript.srt
+          curl -L -s -o transcripts/transcript.srt "https://archive.org/download/$SAMPLE_ITEM/transcript.srt" || true
 
+          # Cek jika file terunduh adalah error HTML atau kosong
+          if [ ! -s transcripts/transcript.srt ] || grep -qi "<html>\|<!DOCTYPE" transcripts/transcript.srt; then
+            echo "[ WARN ] Unduhan berupa HTML error atau kosong. Mengambil transkrip fallback valid..."
+            curl -L -s -o transcripts/transcript.srt "https://archive.org/download/vot-denpasar-20261008-183012/transcript.srt"
+          fi
           echo "[ INFO ] Membersihkan transkrip dengan main/clean.py..."
           python3 main/clean.py transcripts/transcript.srt > clean.txt
           echo "[ OK ] clean.txt selesai dibuat ($(wc -l < clean.txt) baris)."
@@ -137,6 +137,12 @@ jobs:
           echo "=== Hasil out.json ==="
           cat out.json
 
+          echo "### 🧠 Hasil Eksekusi Local LLM Qwen3.8-27B" >> $GITHUB_STEP_SUMMARY
+          echo "- **Model**: \`${{ inputs.model_filename }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Sample Item**: [\`${{ inputs.sample_item }}\`](https://archive.org/details/${{ inputs.sample_item }})" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          cat out.json >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
       # ── 6. Simpan Artifact Hasil Uji Coba ───────────────────────────────────
       - name: Upload Artifacts
         if: always()
