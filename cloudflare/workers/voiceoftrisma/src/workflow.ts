@@ -77,8 +77,7 @@ export async function triggerWorkflows(
 /* Cron 0 * * * *: trigger pipeline guard.
    - Jam 00:00, 06:00, 12:00, 18:00 WITA (UTC 16, 22, 04, 10):
      transcribe_only (limit 10 runner paralel)
-   - Jam lainnya (tiap 1 jam sekali):
-     describe_only (limit 5 runner paralel)
+   - Auto describe_only tiap 1 jam dinonaktifkan sementara.
 */
 export async function triggerPipelineGuard(
 	env: Env
@@ -93,9 +92,14 @@ export async function triggerPipelineGuard(
 	// WITA = UTC+8. WITA 00, 06, 12, 18 -> UTC 16, 22, 04, 10
 	const isTranscribeHour = [4, 10, 16, 22].includes(utcHour);
 
-	const mode = isTranscribeHour ? "transcribe_only" : "describe_only";
-	const limit = isTranscribeHour ? "10" : "5";
+	// Auto describe-only tiap 1 jam dinonaktifkan sementara (hanya jalankan transcribe_only pada jam 00, 06, 12, 18 WITA)
+	if (!isTranscribeHour) {
+		console.log("[ SKIP ] Auto describe_only tiap jam dinonaktifkan.");
+		return { workflow: "pipeline-guard.yml", status: 200, ok: true };
+	}
 
+	const mode = "transcribe_only";
+	const limit = "10";
 	const result = await triggerWorkflow("pipeline-guard.yml", token, { mode, limit, max_scan: "1000" });
 	if (result.ok) {
 		console.log(`[ OK ] pipeline-guard.yml triggered (mode=${mode}, limit=${limit})`);
