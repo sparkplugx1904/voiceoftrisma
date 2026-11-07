@@ -2,10 +2,10 @@ name: Pipeline Guard
 
 on:
   schedule:
-    # Transcribe only: tiap 6 jam (WITA 00, 06, 12, 18 = UTC 16, 22, 04, 10)
+    # Transcribe only: tiap 6 jam (WITA 00:00, 06:00, 12:00, 18:00 = UTC 16:00, 22:00, 04:00, 10:00)
     - cron: "0 4,10,16,22 * * *"
-    # Describe only: tiap jam
-    - cron: "0 * * * *"
+    # Describe only: tiap 1 jam sekali (menit 30 agar terpisah dan tidak bertabrakan dengan transcribe)
+    - cron: "30 * * * *"
   workflow_dispatch:
     inputs:
       limit:
@@ -51,7 +51,7 @@ permissions:
 
 # Satu run per jenis jadwal; run baru menunggu yang lama selesai
 concurrency:
-  group: pipeline-guard-${{ github.event.schedule || github.run_id }}
+  group: pipeline-guard-${{ github.event_name == 'schedule' && (contains(github.event.schedule, '4,10,16,22') && 'transcribe' || 'describe') || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -75,6 +75,7 @@ jobs:
       - name: Scan Archive.org Items
         id: scan
         env:
+          EVENT_NAME: ${{ github.event_name }}
           SCHEDULE: ${{ github.event.schedule }}
           INPUT_MODE: ${{ inputs.mode }}
           INPUT_LIMIT: ${{ inputs.limit }}
@@ -88,26 +89,28 @@ jobs:
 
           MAX_SCAN="${INPUT_MAX_SCAN:-100}"
 
-          # Mode: manual dispatch pakai pilihan user, schedule ditentukan dari cron
-          if [ -n "$INPUT_MODE" ]; then
-            MODE="$INPUT_MODE"
-          elif [ "$SCHEDULE" = "0 * * * *" ]; then
-            MODE="describe_only"
-          elif [ -n "$SCHEDULE" ]; then
-            MODE="transcribe_only"
+          # Penentuan mode & limit:
+          # - Jika schedule: tentukan murni dari cron yang memicu
+          # - Jika workflow_dispatch: gunakan input dari user
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            if [ "$SCHEDULE" = "0 4,10,16,22 * * *" ]; then
+              MODE="transcribe_only"
+              LIMIT=10
+            else
+              MODE="describe_only"
+              LIMIT=5
+            fi
           else
-            MODE="auto"
+            MODE="${INPUT_MODE:-auto}"
+            if [ -n "$INPUT_LIMIT" ]; then
+              LIMIT="$INPUT_LIMIT"
+            elif [ "$MODE" = "transcribe_only" ]; then
+              LIMIT=10
+            else
+              LIMIT=5
+            fi
           fi
-
-          # Limit: input manual menang, kalau kosong tentukan dari mode
-          if [ -n "$INPUT_LIMIT" ]; then
-            LIMIT="$INPUT_LIMIT"
-          elif [ "$MODE" = "transcribe_only" ]; then
-            LIMIT=10
-          else
-            LIMIT=5
-          fi
-          echo "Mode: $MODE | Limit: $LIMIT | Max scan: $MAX_SCAN"
+          echo "Event: $EVENT_NAME | Mode: $MODE | Limit: $LIMIT | Max scan: $MAX_SCAN"
 
           python main/guard.py scan \
             --limit "$LIMIT" \
@@ -146,10 +149,14 @@ jobs:
         env:
           ITEM_ID: ${{ matrix.item_id }}
           AUDIO_URL: ${{ matrix.audio_url }}
-          WHISPER_MODEL: ${{ inputs.whisper_model || 'medium' }}
+          WHISPER_MODEL: ${{ inputs.whisper_model }}
         run: |
-          echo "[ INFO ] Transcribing $ITEM_ID dari $AUDIO_URL menggunakan model: $WHISPER_MODEL..."
-          python3 -u main/transcribe.py "$AUDIO_URL" "$WHISPER_MODEL"
+          MODEL="${WHISPER_MODEL:-medium}"
+          if [ "$MODEL" = "true" ] || [ -z "$MODEL" ]; then
+            MODEL="medium"
+          fi
+          echo "[ INFO ] Transcribing $ITEM_ID dari $AUDIO_URL menggunakan model: $MODEL..."
+          python3 -u main/transcribe.py "$AUDIO_URL" "$MODEL"
 
       - name: Generate Description from SRT
         if: matrix.action == 'transcribe_and_describe'
