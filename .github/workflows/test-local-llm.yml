@@ -1,0 +1,152 @@
+name: 🧪 Test Local LLM (Llama.cpp & Qwen)
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_url:
+        description: "URL download model GGUF"
+        required: false
+        default: "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/main/Qwen3.8-27B-UD-Q4_K_XL.gguf"
+      model_filename:
+        description: "Nama file model GGUF"
+        required: false
+        default: "Qwen3.8-27B-UD-Q4_K_XL.gguf"
+      sample_item:
+        description: "Archive.org Item ID untuk mengambil transkrip sampel"
+        required: false
+        default: "vot-denpasar-20261107-183013"
+      context_size:
+        description: "Kapasitas context size (tokens)"
+        required: false
+        default: "32768"
+
+permissions:
+  contents: read
+
+jobs:
+  test_llm:
+    name: 🧠 Test Llama Server Inference
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout Repository with Git LFS
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # ── 1. Bebaskan disk space & aktifkan 24GB swap untuk model 27B ────────
+      - name: Free Disk Space & Configure 24GB Swap
+        run: |
+          echo "=== Ruang Disk Sebelum Pembersihan ==="
+          df -h /
+          echo "Menghapus komponen bawaan runner yang tidak diperlukan..."
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache
+          sudo apt-get clean
+          echo "=== Ruang Disk Setelah Pembersihan ==="
+          df -h /
+
+          echo "Mengalokasikan 24GB swapfile..."
+          sudo fallocate -l 24G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=24576
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          echo "=== Status Memori & Swap ==="
+          free -h
+
+      # ── 2. Download Model GGUF ──────────────────────────────────────────────
+      - name: Download GGUF Model
+        env:
+          MODEL_URL: ${{ inputs.model_url }}
+          MODEL_FILENAME: ${{ inputs.model_filename }}
+        run: |
+          mkdir -p "$HOME/qwen"
+          MODEL_PATH="$HOME/qwen/$MODEL_FILENAME"
+          echo "[ INFO ] Mengunduh model GGUF dari $MODEL_URL ke $MODEL_PATH..."
+          curl -L -f --progress-bar -o "$MODEL_PATH" "$MODEL_URL"
+          echo "[ OK ] Download selesai:"
+          ls -lh "$MODEL_PATH"
+
+      # ── 3. Ambil Transkrip Sampel & Jalankan clean.py ───────────────────────
+      - name: Prepare Sample Transcript
+        env:
+          SAMPLE_ITEM: ${{ inputs.sample_item }}
+        run: |
+          mkdir -p transcripts
+          echo "[ INFO ] Mengunduh transcript untuk item: $SAMPLE_ITEM..."
+          curl -L -f -s -o transcripts/transcript.srt "https://archive.org/download/$SAMPLE_ITEM/transcript.srt" || \
+          curl -L -f -s -o transcripts/transcript.srt "https://archive.org/download/$SAMPLE_ITEM/transcript.txt" || \
+          cp assets/sample_vot.txt transcripts/transcript.srt || \
+          printf "1\n00:00:00,000 --> 00:00:05,000\nVoice of Trisma online radio\n" > transcripts/transcript.srt
+
+          echo "[ INFO ] Membersihkan transkrip dengan main/clean.py..."
+          python3 main/clean.py transcripts/transcript.srt > clean.txt
+          echo "[ OK ] clean.txt selesai dibuat ($(wc -l < clean.txt) baris)."
+          echo "=== 30 Baris Pertama clean.txt ==="
+          head -n 30 clean.txt
+
+      # ── 4. Jalankan llama-server di Background ──────────────────────────────
+      - name: Start Llama Server
+        env:
+          MODEL_FILENAME: ${{ inputs.model_filename }}
+          CTX_SIZE: ${{ inputs.context_size }}
+        run: |
+          chmod +x bin/linux-x64/llama-server
+          MODEL_PATH="$HOME/qwen/$MODEL_FILENAME"
+
+          echo "[ INFO ] Memulai llama-server pada port 8080..."
+          nohup ./bin/linux-x64/llama-server \
+            -m "$MODEL_PATH" \
+            -c "$CTX_SIZE" \
+            -t $(nproc) \
+            --jinja \
+            --chat-template-kwargs '{"enable_thinking":false}' \
+            --port 8080 > server.log 2>&1 &
+
+          echo "[ INFO ] Menunggu server siap merespons..."
+          READY=0
+          for i in $(seq 1 120); do
+            if curl -s http://127.0.0.1:8080/health | grep -qi "ok\|ready\|status"; then
+              echo "[ OK ] llama-server siap merespons!"
+              READY=1
+              break
+            fi
+            echo "Menunggu inisialisasi model ($i/120)..."
+            sleep 5
+          done
+
+          if [ $READY -eq 0 ]; then
+            echo "[ ERROR ] llama-server gagal siap dalam waktu 10 menit!"
+            echo "=== Isi server.log ==="
+            cat server.log
+            exit 1
+          fi
+
+      # ── 5. Jalankan ask.py untuk Meminta Respons JSON ───────────────────────
+      - name: Run Inference (ask.py)
+        run: |
+          echo "[ INFO ] Mengirim prompt dan clean.txt ke llama-server..."
+          python3 main/ask.py main/prompt.txt clean.txt out.json http://127.0.0.1:8080/v1/chat/completions
+          echo "=== Hasil out.json ==="
+          cat out.json
+
+      # ── 6. Simpan Artifact Hasil Uji Coba ───────────────────────────────────
+      - name: Upload Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-local-llm-output
+          path: |
+            out.json
+            clean.txt
+            server.log
+          if-no-files-found: ignore
+          retention-days: 7
