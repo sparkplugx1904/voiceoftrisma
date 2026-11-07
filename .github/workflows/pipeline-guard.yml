@@ -2,13 +2,16 @@ name: Pipeline Guard
 
 on:
   schedule:
-    - cron: "0 13 * * 6"   # Tiap hari Sabtu jam 13:00 UTC (~21:00 WITA)
+    # Transcribe only: tiap 6 jam (WITA 00, 06, 12, 18 = UTC 16, 22, 04, 10)
+    - cron: "0 4,10,16,22 * * *"
+    # Describe only: tiap jam
+    - cron: "0 * * * *"
   workflow_dispatch:
     inputs:
       limit:
-        description: "Jumlah rekaman maksimal yang diproses"
+        description: "Jumlah rekaman maksimal yang diproses (kosong = otomatis: 10 transcribe, 5 describe)"
         required: false
-        default: "5"
+        default: ""
       max_scan:
         description: "Jumlah rekaman terbaru yang diperiksa (default: 100)"
         required: false
@@ -46,6 +49,11 @@ on:
 permissions:
   contents: read
 
+# Satu run per jenis jadwal; run baru menunggu yang lama selesai
+concurrency:
+  group: pipeline-guard-${{ github.event.schedule || github.run_id }}
+  cancel-in-progress: false
+
 jobs:
   scan:
     name: 🔍 Scan Archive Recordings
@@ -67,16 +75,39 @@ jobs:
       - name: Scan Archive.org Items
         id: scan
         env:
-          GITHUB_STEP_SUMMARY: ${{ env.GITHUB_STEP_SUMMARY }}
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_LIMIT: ${{ inputs.limit }}
+          INPUT_MAX_SCAN: ${{ inputs.max_scan }}
+          INPUT_ITEM_ID: ${{ inputs.item_id }}
         run: |
           ITEM_ARG=""
-          if [ -n "${{ inputs.item_id }}" ]; then
-            ITEM_ARG="--item-id ${{ inputs.item_id }}"
+          if [ -n "$INPUT_ITEM_ID" ]; then
+            ITEM_ARG="--item-id $INPUT_ITEM_ID"
           fi
 
-          LIMIT="${{ inputs.limit || '5' }}"
-          MODE="${{ inputs.mode || 'auto' }}"
-          MAX_SCAN="${{ inputs.max_scan || '100' }}"
+          MAX_SCAN="${INPUT_MAX_SCAN:-100}"
+
+          # Mode: manual dispatch pakai pilihan user, schedule ditentukan dari cron
+          if [ -n "$INPUT_MODE" ]; then
+            MODE="$INPUT_MODE"
+          elif [ "$SCHEDULE" = "0 * * * *" ]; then
+            MODE="describe_only"
+          elif [ -n "$SCHEDULE" ]; then
+            MODE="transcribe_only"
+          else
+            MODE="auto"
+          fi
+
+          # Limit: input manual menang, kalau kosong tentukan dari mode
+          if [ -n "$INPUT_LIMIT" ]; then
+            LIMIT="$INPUT_LIMIT"
+          elif [ "$MODE" = "transcribe_only" ]; then
+            LIMIT=10
+          else
+            LIMIT=5
+          fi
+          echo "Mode: $MODE | Limit: $LIMIT | Max scan: $MAX_SCAN"
 
           python main/guard.py scan \
             --limit "$LIMIT" \
@@ -92,6 +123,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: 10
       matrix:
         include: ${{ fromJson(needs.scan.outputs.matrix) }}
 
@@ -111,23 +143,27 @@ jobs:
 
       - name: Transcribe Audio
         if: matrix.action == 'transcribe_and_describe'
+        env:
+          ITEM_ID: ${{ matrix.item_id }}
+          AUDIO_URL: ${{ matrix.audio_url }}
+          WHISPER_MODEL: ${{ inputs.whisper_model || 'medium' }}
         run: |
-          MODEL="${{ inputs.whisper_model || 'medium' }}"
-          echo "[ INFO ] Transcribing ${{ matrix.item_id }} dari ${{ matrix.audio_url }} menggunakan model: $MODEL..."
-          python3 -u main/transcribe.py "${{ matrix.audio_url }}" "$MODEL"
+          echo "[ INFO ] Transcribing $ITEM_ID dari $AUDIO_URL menggunakan model: $WHISPER_MODEL..."
+          python3 -u main/transcribe.py "$AUDIO_URL" "$WHISPER_MODEL"
 
       - name: Generate Description from SRT
         if: matrix.action == 'transcribe_and_describe'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ inputs.gemini_model }}
         run: |
           SRT_FILE="transcripts/transcript.srt"
           if [ ! -f "$SRT_FILE" ] && [ -f "transcripts/transcript.txt" ]; then
             SRT_FILE="transcripts/transcript.txt"
           fi
           MODEL_ARG=""
-          if [ -n "${{ inputs.gemini_model }}" ]; then
-            MODEL_ARG="-m ${{ inputs.gemini_model }}"
+          if [ -n "$GEMINI_MODEL" ]; then
+            MODEL_ARG="-m $GEMINI_MODEL"
           fi
           python main/descriptor.py "$SRT_FILE" -o transcripts/description.json $MODEL_ARG
 
@@ -151,27 +187,33 @@ jobs:
           IA_ACCESS_KEY: ${{ secrets.IA_ACCESS_KEY }}
           IA_SECRET_KEY: ${{ secrets.IA_SECRET_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ITEM_ID: ${{ matrix.item_id }}
+          SRT_URL: ${{ matrix.srt_url }}
+          GEMINI_MODEL: ${{ inputs.gemini_model }}
         run: |
           SRT_ARG=""
-          if [ -n "${{ matrix.srt_url }}" ]; then
-            SRT_ARG="--srt-url ${{ matrix.srt_url }}"
+          if [ -n "$SRT_URL" ]; then
+            SRT_ARG="--srt-url $SRT_URL"
           fi
           MODEL_ARG=""
-          if [ -n "${{ inputs.gemini_model }}" ]; then
-            MODEL_ARG="--model ${{ inputs.gemini_model }}"
+          if [ -n "$GEMINI_MODEL" ]; then
+            MODEL_ARG="--model $GEMINI_MODEL"
           fi
           python3 -u main/guard.py fix-description \
-            --item-id "${{ matrix.item_id }}" \
+            --item-id "$ITEM_ID" \
             $SRT_ARG \
             $MODEL_ARG
 
       # ── Log Summary ke GitHub Actions Step Summary ─────────────────────────
       - name: Log Step Summary
         if: always() && matrix.action != 'skip'
+        env:
+          ITEM_ID: ${{ matrix.item_id }}
+          ACTION: ${{ matrix.action }}
         run: |
-          echo "### 🛡️ Pipeline Guard: ${{ matrix.item_id }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Aksi**: \`${{ matrix.action }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Tautan Arsip**: [https://archive.org/details/${{ matrix.item_id }}](https://archive.org/details/${{ matrix.item_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "### 🛡️ Pipeline Guard: $ITEM_ID" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Aksi**: \`$ACTION\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Tautan Arsip**: [https://archive.org/details/$ITEM_ID](https://archive.org/details/$ITEM_ID)" >> "$GITHUB_STEP_SUMMARY"
 
       # ── Artifact Backup ───────────────────────────────────────────────────
       - name: Upload Transcripts Artifact
