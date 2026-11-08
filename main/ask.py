@@ -11,6 +11,23 @@ out_file = sys.argv[3] if len(sys.argv) > 3 else "out.json"
 server_url = sys.argv[4] if len(sys.argv) > 4 else "http://127.0.0.1:8080/v1/chat/completions"
 think_file = "think.txt"
 
+# Resolusi parameter reasoning_effort
+reasoning_effort = os.environ.get("REASONING_EFFORT", "").strip() or None
+
+if len(sys.argv) > 5 and not sys.argv[5].startswith("-"):
+    val = sys.argv[5].strip()
+    if val:
+        reasoning_effort = val
+
+for i, arg in enumerate(sys.argv[1:], start=1):
+    if arg.startswith(("--reasoning-effort=", "--reasoning_effort=")):
+        reasoning_effort = arg.split("=", 1)[1].strip()
+    elif arg in ("--reasoning-effort", "--reasoning_effort") and i + 1 < len(sys.argv):
+        reasoning_effort = sys.argv[i + 1].strip()
+
+if reasoning_effort and reasoning_effort.lower() in ("default", "none", "null", "false", ""):
+    reasoning_effort = None
+
 sys_prompt = open(prompt_file, encoding="utf-8").read()
 tr = open(clean_file, encoding="utf-8").read()
 
@@ -23,9 +40,12 @@ print(f"[ INFO ] Ukuran prompt sistem    : ~{prompt_tokens_est:,} token", flush=
 print(f"[ INFO ] Ukuran transkrip input : ~{tr_tokens_est:,} token", flush=True)
 print(f"[ INFO ] Estimasi total input   : ~{total_tokens_est:,} token", flush=True)
 print(f"[ INFO ] Server target          : {server_url}", flush=True)
+if reasoning_effort:
+    print(f"[ INFO ] Reasoning effort        : {reasoning_effort}", flush=True)
 print("=" * 65, flush=True)
 
-# DeepSeek-R1 membutuhkan alokasi token yang lega untuk penalaran (<think>) + JSON utuh
+# DeepSeek-R1 / Qwen3 / gpt-oss membutuhkan alokasi token yang lega untuk penalaran + JSON utuh
+max_tokens_val = int(os.environ.get("MAX_TOKENS", "8192"))
 body = {
     "messages": [
         {"role": "system", "content": sys_prompt},
@@ -33,9 +53,11 @@ body = {
     ],
     "temperature": 0.6,
     "top_p": 0.95,
-    "max_tokens": 8192,
+    "max_tokens": max_tokens_val,
     "stream": True
 }
+if reasoning_effort:
+    body["reasoning_effort"] = reasoning_effort
 
 req = urllib.request.Request(
     server_url,
@@ -47,6 +69,7 @@ print("[ INFO ] Mengirim request ke llama-server...", flush=True)
 print("[ INFO ] Menunggu pemrosesan prompt di CPU... Aliran penalaran (<think>) dan token JSON akan langsung mengalir di bawah:\n", flush=True)
 
 collected = []
+reasoning_collected = []
 first_token = False
 
 try:
@@ -65,6 +88,15 @@ try:
                     if choices:
                         delta = choices[0].get("delta", {})
                         chunk = delta.get("content", "")
+                        reasoning_chunk = delta.get("reasoning_content", "") or delta.get("reasoning", "")
+                        if reasoning_chunk:
+                            if not first_token:
+                                first_token = True
+                                print("=" * 65, flush=True)
+                                print("[ LIVE STREAM ] Aliran token aktif:", flush=True)
+                                print("=" * 65, flush=True)
+                            print(reasoning_chunk, end="", flush=True)
+                            reasoning_collected.append(reasoning_chunk)
                         if chunk:
                             if not first_token:
                                 first_token = True
@@ -79,24 +111,39 @@ except Exception as e:
     print(f"\n[ERROR] Koneksi atau inferensi gagal: {e}", flush=True)
 
 full_text = "".join(collected).strip()
+reasoning_text = "".join(reasoning_collected).strip()
 
-# ── 1. Ekstrak dan Simpan Jalur Penalaran (<think>...</think>) ─────────────────
+# ── 1. Ekstrak dan Simpan Jalur Penalaran (<think>...</think> / <thought> / reasoning_content) ──
 think_text = ""
 json_raw = full_text
 
+if reasoning_text:
+    think_text = reasoning_text
+
 think_match = re.search(r"<think>(.*?)(?:</think>|$)", full_text, re.DOTALL)
 if think_match:
-    think_text = think_match.group(1).strip()
+    extracted = think_match.group(1).strip()
+    think_text = (think_text + "\n\n" + extracted).strip() if think_text else extracted
+
+thought_match = re.search(r"<thought>(.*?)(?:</thought>|$)", full_text, re.DOTALL)
+if thought_match:
+    extracted = thought_match.group(1).strip()
+    think_text = (think_text + "\n\n" + extracted).strip() if think_text else extracted
+
+if think_text:
     with open(think_file, "w", encoding="utf-8") as f:
         f.write(think_text)
-    print(f"\n\n[ INFO ] Jalur penalaran (<think>) dipisahkan dan disimpan ke {think_file} ({len(think_text):,} karakter)", flush=True)
+    print(f"\n\n[ INFO ] Jalur penalaran dipisahkan dan disimpan ke {think_file} ({len(think_text):,} karakter)", flush=True)
 
-# Ambil bagian teks murni setelah </think>
+# Ambil bagian teks murni setelah </think> atau </thought>
 if "</think>" in full_text:
     json_raw = full_text.split("</think>")[-1].strip()
+elif "</thought>" in full_text:
+    json_raw = full_text.split("</thought>")[-1].strip()
 elif "<think>" in full_text and "</think>" not in full_text:
     json_raw = full_text
-
+elif "<thought>" in full_text and "</thought>" not in full_text:
+    json_raw = full_text
 # Bersihkan markdown fence ```json jika ada
 json_raw = re.sub(r"^```(?:json)?\s*", "", json_raw, flags=re.MULTILINE)
 json_raw = re.sub(r"\s*```$", "", json_raw, flags=re.MULTILINE).strip()
