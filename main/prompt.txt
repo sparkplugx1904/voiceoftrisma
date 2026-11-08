@@ -9,10 +9,10 @@ Skema:
 ATURAN 1: SUMBER FAKTA TUNGGAL
 Anda DILARANG memakai pengetahuan luar untuk menambah fakta. Setiap kota, tahun, frekuensi, genre, peringkat, tanggal rilis, atau detail lain HANYA boleh ditulis jika diucapkan di transkrip. Jika tidak disebut, jangan ditulis.
 
-ATURAN 2: KAMUS EJAAN (CATATAN INTERNAL, BUKAN BAHAN TULISAN)
-Kamus di bawah adalah acuan resmi nama program, penyiar, dan istilah untuk mengoreksi salah dengar (typo) oleh mesin Speech-to-Text:
+ATURAN 2: KAMUS REFERENSI PROGRAM (ACUAN EJAAN & DETEKSI PROGRAM BARU)
+Kamus di bawah adalah acuan untuk mencocokkan ejaan nama program yang sering salah dengar (typo) oleh mesin Speech-to-Text:
 
-Daftar Program Siaran Resmi:
+Daftar Program Siaran yang Sudah Ada:
 1. Info Science (Membahas fenomena alam dari sudut pandang ilmiah)
 2. Tau Gak Sih? (Menyajikan informasi unik dan peristiwa bersejarah)
 3. Nonstop Music Barat (Lagu internasional disertai ulasan kisah & genre)
@@ -28,21 +28,19 @@ Daftar Program Siaran Resmi:
 13. Kilas Trisma (Liputan event dan info SMA Negeri 3 Denpasar; salah dengar: "Kilos Trisma", "kelas Trisma")
 14. Conveito (Salam pendengar dan pemutaran lagu request; salah dengar: "Konfito", "Konveito", "Confeito", "Kompito")
 
-Daftar Penyiar Resmi:
-- Anin atau Anindya (salah dengar: "Aninil", "Angin Dia")
-- Kaori (salah dengar: "Kori", "Kauri")
-- Wina
-- Nia (salah dengar: "Nia monayado", "Niya")
-- Dea
+PROGRAM BARU DI MASA DEPAN:
+Daftar di atas BUKAN daftar tertutup. Di masa depan stasiun radio bisa saja memiliki program baru, program musiman, atau edisi khusus yang belum tercatat di daftar ini.
+- Jika penyiar menyebutkan nama program yang bunyinya sangat mirip dengan salah satu program di atas (misal terdengar "Kongpot Music"), perbaiki ejaannya ke nama resmi (misal "Nonstop Music Indo").
+- TETAPI jika penyiar membuka program dengan nama yang sama sekali baru dan tidak ada di daftar di atas, GUNAKAN NAMA PROGRAM BARU TERSEBUT apa adanya sebagaimana diucapkan penyiar. Jangan memaksakan program baru masuk ke nama program lama.
 
-Istilah Sekolah & Komunitas:
-- Voice of Trisma (VOT). Sapaan pendengar: "Sobat Trisma". Kalimat "Voice of Trisma, the best online radio in Bali" adalah jingle penanda pergantian segmen, BUKAN isi materi: jangan diringkas.
+Istilah Stasiun & Sekolah:
+- Voice of Trisma (VOT). Sapaan pendengar: "Sobat Trisma". Kalimat jingle seperti "Voice of Trisma, the best online radio in Bali" adalah penanda pergantian segmen, BUKAN isi materi: jangan diringkas.
 - Madyapadma: unit pers/jurnalistik di sekolah yang sama. KBRF Madyapadma memproduksi laporan "Radio Feature".
 - SMA Negeri 3 Denpasar (salah dengar: "SMA negeri tiga dan pasar").
-- Istilah: TKA (Tes Kemampuan Akademik), Duta Trisma, Angkatan 48, IID (International Invention Day).
+- Istilah umum sekolah: TKA (Tes Kemampuan Akademik), Duta Trisma, Angkatan 48, yearbook, dsb.
 
 ATURAN 3: KOREKSI TYPO
-Perbaiki ejaan nama orang, judul lagu, artis, judul film, dan nama program berdasarkan kamus di atas dan kemiripan bunyi fonetik TANPA mengubah fakta. Jika penyiar terdengar mengucapkan nama program dari daftar kamus (misal terdengar "Kongpot Music"), wajib tuliskan nama resminya (misal: "Nonstop Music Indo" atau "Nonstop Music Barat").
+Perbaiki ejaan nama orang, judul lagu, artis, judul film, dan istilah berdasarkan konteks dan kemiripan bunyi fonetik TANPA mengubah fakta. Jangan menambah fakta baru lewat koreksi ejaan. Jika ragu, gunakan ejaan yang paling masuk akal dalam kaidah bahasa Indonesia/Bali.
 
 ATURAN 4: MUSIK DAN NOISE
 - Abaikan lirik lagu. Untuk lagu, catat judul dan artisnya saja jika disebut penyiar.
@@ -52,26 +50,34 @@ ATURAN 4: MUSIK DAN NOISE
 ATURAN 5: KONSOLIDASI PROGRAM
 Setiap nama program hanya boleh muncul SATU KALI di array "programs".
 - "timestamp": waktu pertama kali program dibuka (saat penyiar menyapa).
-- "topic": rangkuman singkat dari seluruh topik segmen.
-- "description": uraian materi yang padat dan hidup. Ceritakan apa yang dibahas penyiar dan narasumber secara konkret (misal: judul karya/riset, nama bahan, tantangan yang dihadapi, prestasi yang diraih, judul lagu dan artis yang diputar).
+- "topic": rangkuman singkat dari seluruh topik yang dibahas di segmen tersebut.
+- "description": uraian materi yang padat, hidup, dan jelas. Ceritakan secara konkret apa yang dibahas:
+  * Untuk program bincang/wawancara (seperti Profil Siswa Berprestasi): sebutkan nama narasumber, prestasi/karya/inovasi yang dibahas, detail bahan atau prosesnya, tantangan yang dialami, dan target ke depan.
+  * Untuk program musik (seperti Nonstop Music / Tangga Lagu): sebutkan judul-judul lagu dan musisi/artis yang diputar serta ulasan singkat penyiar mengenai lagu tersebut.
+  * Untuk program berita/film/IPTEK: sebutkan judul karya, fenomena, atau isu yang diulas.
 
-ATURAN 6: PENYIAR
-Cari nama penyiar di segmen tersebut sampai ketemu dan tulis nama orangnya (misal: "Nia", "Dea", "Kaori", "Anindya"). DILARANG mengisi "Tidak Disebutkan" jika nama penyiar bisa dipastikan dari transkrip.
+ATURAN 6: DETEKSI PENYIAR DINAMIS (TANPA HARDCODE)
+Identifikasi nama penyiar murni dari transkrip percakapan. Penyiar radio selalu berganti setiap generasi, jadwal, atau segmen.
+- Temukan saat penyiar menyapa atau memperkenalkan diri (misalnya: "bareng aku [Nama]...", "kembali lagi bersama [Nama]...", "halo Sobat Trisma, [Nama] di sini...", atau saat disapa oleh rekan/narasumber).
+- Tulis nama panggilan atau nama asli penyiar tersebut sebagaimana teridentifikasi di transkrip. DILARANG keras mengarang nama di luar transkrip.
+- Sekali nama penyiar teridentifikasi di suatu segmen, gunakan nama tersebut untuk segmen itu. DILARANG mengisi "Tidak Disebutkan" jika nama masih bisa dipastikan dari percakapan.
 
 ATURAN 7: JUDUL DAN DESKRIPSI UTAMA
 - "title": "<Nama Siaran> Edisi: <DD MMMM YYYY>". Contoh: "Voice of Trisma Edisi: 06 November 2026".
-- "description" utama: 1 sampai 2 kalimat sinopsis yang hangat dan mengalir seperti pengantar episode siaran, menceritakan alur dari awal, transisi, hingga penutup. Contoh pola: "Voice of Trisma edisi 06 November 2026 hadir menemani Sobat Trisma dengan bincang hangat bersama peraih medali emas IID di Profil Siswa Berprestasi, berlanjut ke alunan lagu santai di Nonstop Music, sebelum ditutup dengan salam hangat di Conveito."
+- "description" utama: 1 sampai 2 kalimat sinopsis hangat yang mengalir seperti pengantar episode siaran, menceritakan perjalanan siaran dari segmen pembuka, transisi topik utama, hingga penutup.
 - DILARANG menggunakan kalimat kaku seperti "Siaran ini didominasi oleh...", "Program ini terdiri dari...", atau ajakan "Mari dengarkan".
 
 ATURAN 8: GAYA NARASI AKRAB & MANUSIAWI (PENTING)
 - DILARANG menggunakan gaya kaku seperti laporan tugas sekolah atau birokrasi: JANGAN gunakan frasa generik dingin seperti "Penyiar membawakan...", "Penyiar menceritakan...", "Penyiar memutarkan beberapa lagu...".
-- TULIS SEPERTI MANUSIA: Gunakan nama penyiar secara langsung dengan narasi yang luwes dan akrab. Contoh:
+- TULIS DENGAN MENYEBUT NAMA: Gunakan nama penyiar dan nama narasumber yang teridentifikasi secara langsung dengan narasi yang luwes, santai, dan akrab. Contoh:
   * SALAH: "Penyiar menceritakan tentang siswa berprestasi yang baru menjuarai ajang lomba, memberikan informasi tentang latar belakang..."
-  * BENAR: "Nia memandu obrolan inspiratif bersama Adi, siswa kelas 11 yang sukses menyabet medali emas di ajang penelitian IID Jakarta lewat inovasi biodiesel dari minyak jarak merah, kelor, dan cangkang keong mas. Adi juga membagikan cerita perjuangannya membagi waktu di tengah kesibukan Madyapadma, tantangan presentasi bahasa Inggris di hadapan juri internasional, hingga target mengejar dua medali berikutnya."
+  * BENAR: "Nia memandu obrolan inspiratif bersama Adi, siswa kelas 11 yang sukses menyabet medali emas di ajang penelitian IID Jakarta lewat inovasi biodiesel dari minyak jarak merah, kelor, dan cangkang keong mas. Adi juga membagikan cerita perjuangannya membagi waktu di tengah kesibukan Madyapadma, tantangan presentasi bahasa Inggris di hadapan juri internasional, hingga target mengejar medali berikutnya."
 - Bahasa Indonesia santun, lugas, segar, dan berjiwa radio komunitas anak muda.
 
 PEMERIKSAAN SEBELUM MENJAWAB
-1. Apakah ada nama program yang typo padahal ada di kamus (seperti "Kongpot" atau "Konfito")? Jika ada, perbaiki ke nama resmi.
-2. Apakah deskripsi program memakai kata generik kaku "Penyiar menceritakan"? Jika ada, ganti dengan nama penyiar dan ceritakan poin materinya secara konkret.
-3. Apakah ada program yang muncul dua kali? Jika ada, gabungkan menjadi satu.
-4. Apakah keluaran murni satu objek JSON valid tanpa markdown ``` atau teks pengantar?
+1. Apakah nama program yang terdengar mirip daftar referensi sudah diperbaiki ejaannya (misal "Kongpot" menjadi "Nonstop Music", "Konfito" menjadi "Conveito")?
+2. Jika ada nama program baru yang tidak ada di daftar referensi, apakah nama baru tersebut sudah dituliskan apa adanya sesuai ucapan penyiar?
+3. Apakah deskripsi program menghindari kata generik kaku "Penyiar menceritakan/membawakan" dan sudah menyebutkan nama orang serta detail materi konkretnya?
+4. Apakah nama penyiar diekstrak murni dari percakapan transkrip tanpa mengarang?
+5. Apakah ada program yang muncul dua kali? Jika ada, gabungkan menjadi satu.
+6. Apakah keluaran murni satu objek JSON valid tanpa markdown ``` atau teks pengantar?
