@@ -1,0 +1,234 @@
+name: 🧪 Test Nemotron 3.5 Transcribe (CPU-Only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      quant_level:
+        description: "Pilihan kuantisasi model Nemotron 3.5 Transcribe 30B"
+        type: choice
+        required: true
+        default: "Q2_0"
+        options:
+          - "Q2_0"
+          - "IQ4_NL"
+      sample_duration_min:
+        description: "Durasi sampel audio dalam menit untuk pengujian CPU (default: 5 menit; isi 0 untuk audio penuh 2 jam)"
+        required: false
+        default: "5"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-nemotron-cpu-${{ inputs.quant_level }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  nemotron_cpu_parallel:
+    name: "🎙️ [Nemotron CPU] ${{ matrix.title }} (${{ matrix.item_id }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        include:
+          - item_id: "vot-denpasar-20261107-183001"
+            title: "VOT Denpasar - Sabtu, 07 November 2026"
+            audio_name: "VOT-Denpasar_07-11-26-0.mp3"
+            date: "2026-11-07"
+
+          - item_id: "vot-denpasar-20261106-183004"
+            title: "VOT Denpasar - Jumat, 06 November 2026"
+            audio_name: "VOT-Denpasar_06-11-26-0.mp3"
+            date: "2026-11-06"
+
+          - item_id: "vot-denpasar-20261105-183010"
+            title: "VOT Denpasar - Kamis, 05 November 2026"
+            audio_name: "VOT-Denpasar_05-11-26-0.mp3"
+            date: "2026-11-05"
+
+          - item_id: "vot-denpasar-20261103-183002"
+            title: "VOT Denpasar - Selasa, 03 November 2026"
+            audio_name: "VOT-Denpasar_03-11-26-0.mp3"
+            date: "2026-11-03"
+
+          - item_id: "vot-denpasar-20261102-183004"
+            title: "VOT Denpasar - Senin, 02 November 2026"
+            audio_name: "VOT-Denpasar_02-11-26-0.mp3"
+            date: "2026-11-02"
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # ── 1. Instalasi FFmpeg & aria2 ─────────────────────────────────────────
+      - name: Install System Dependencies
+        run: |
+          echo "[ INFO ] Menginstal FFmpeg dan aria2c..."
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg aria2
+
+      # ── 2. Pembersihan Disk & Konfigurasi 32GB Swap ─────────────────────────
+      - name: Configure 32GB Swap
+        run: |
+          echo "=== Membersihkan Ruang Disk Runner ==="
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift 2>/dev/null || true
+          df -h /
+          echo "Mengalokasikan 32GB swapfile untuk inferensi CPU 30B..."
+          sudo fallocate -l 32G /swapfile_extra || sudo dd if=/dev/zero of=/swapfile_extra bs=1M count=32768
+          sudo chmod 600 /swapfile_extra
+          sudo mkswap /swapfile_extra
+          sudo swapon /swapfile_extra
+          echo "=== Status Memori & Swap ==="
+          free -h
+
+      # ── 3. Unduh Model GGUF & Audio Projector (mmproj) ──────────────────────
+      - name: Download Nemotron Model & mmproj
+        env:
+          QUANT_LEVEL: ${{ inputs.quant_level || 'Q2_0' }}
+        run: |
+          mkdir -p models_nemotron
+          
+          MMPROJ_URL="https://huggingface.co/maternion/Nemotron-3.5-Transcribe-30B-A4B-IQ-GGUF/resolve/main/mmproj-NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-BF16.gguf"
+          MMPROJ_FILE="mmproj-NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-BF16.gguf"
+          
+          if [ "$QUANT_LEVEL" = "IQ4_NL" ]; then
+            DECODER_URL="https://huggingface.co/maternion/Nemotron-3.5-Transcribe-30B-A4B-IQ-GGUF/resolve/main/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-IQ4_NL.gguf"
+            DECODER_FILE="NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-IQ4_NL.gguf"
+          else
+            DECODER_URL="https://huggingface.co/maternion/Nemotron-3.5-Transcribe-30B-A4B-IQ-GGUF/resolve/main/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-Q2_0.gguf"
+            DECODER_FILE="NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-Q2_0.gguf"
+          fi
+          
+          echo "[ INFO ] Mengunduh audio projector (mmproj)..."
+          aria2c -x 16 -s 16 -k 1M --file-allocation=none \
+            --allow-overwrite=true --auto-file-renaming=false \
+            -d models_nemotron -o "$MMPROJ_FILE" "$MMPROJ_URL"
+          
+          echo "[ INFO ] Mengunduh decoder ($QUANT_LEVEL)..."
+          aria2c -x 16 -s 16 -k 1M --file-allocation=none \
+            --allow-overwrite=true --auto-file-renaming=false \
+            -d models_nemotron -o "$DECODER_FILE" "$DECODER_URL"
+          
+          echo "DECODER_PATH=models_nemotron/$DECODER_FILE" >> $GITHUB_ENV
+          echo "MMPROJ_PATH=models_nemotron/$MMPROJ_FILE" >> $GITHUB_ENV
+          
+          echo "[ OK ] Model siap:"
+          ls -lh models_nemotron/
+
+      # ── 4. Unduh Berkas Audio Siaran via Worker Proxy ───────────────────────
+      - name: Download Broadcast Audio via Worker Proxy
+        env:
+          ITEM_ID: ${{ matrix.item_id }}
+          AUDIO_NAME: ${{ matrix.audio_name }}
+        run: |
+          mkdir -p audio_downloads
+          python3 -c "
+          from pathlib import Path
+          from main.core.downloader import download_archive_file
+          import os, sys
+          item = os.environ['ITEM_ID']
+          name = os.environ['AUDIO_NAME']
+          url = f'https://archive.org/download/{item}/{name}'
+          dest = Path('audio_downloads') / f'{item}_{name}'
+          if not download_archive_file(url, dest, min_size=5_000_000, is_text=False):
+              sys.exit(1)
+          print(f'[OK] Audio terunduh: {dest} ({dest.stat().st_size / (1024**2):.1f} MB)')
+          "
+          echo "RAW_AUDIO_PATH=audio_downloads/${{ matrix.item_id }}_${{ matrix.audio_name }}" >> $GITHUB_ENV
+
+      # ── 5. Siapkan Berkas WAV (16kHz Mono) & Slicing Durasi ─────────────────
+      - name: Prepare Audio WAV & Slicing
+        env:
+          SAMPLE_MIN: ${{ inputs.sample_duration_min || '5' }}
+        run: |
+          MINUTES="${SAMPLE_MIN:-5}"
+          echo "[ INFO ] Menyiapkan berkas WAV 16kHz mono (durasi: $MINUTES menit)..."
+          
+          if [ "$MINUTES" -gt 0 ]; then
+            DURATION_SEC=$((MINUTES * 60))
+            ffmpeg -y -i "$RAW_AUDIO_PATH" -t "$DURATION_SEC" -ar 16000 -ac 1 -c:a pcm_s16le audio_input.wav
+          else
+            ffmpeg -y -i "$RAW_AUDIO_PATH" -ar 16000 -ac 1 -c:a pcm_s16le audio_input.wav
+          fi
+          
+          echo "[ OK ] audio_input.wav siap: $(ls -lh audio_input.wav | awk '{print $5}')"
+
+      # ── 6. Jalankan Transkripsi Nemotron di CPU (llama-cli) ─────────────────
+      - name: Run Nemotron Transcription on CPU
+        run: |
+          chmod +x bin/linux-x64/llama-cli
+          
+          PROMPT="Audio transcription. Language: as spoken. Wording: verbatim. Formatting: punctuation and capitalization. Output: transcript only."
+          
+          echo "=========================================================="
+          echo "[ INFO ] Memulai inferensi Nemotron 3.5 Transcribe di CPU..."
+          echo "[ INFO ] Decoder : $DECODER_PATH"
+          echo "[ INFO ] mmproj  : $MMPROJ_PATH"
+          echo "[ INFO ] Audio   : audio_input.wav"
+          echo "[ INFO ] Threads : $(nproc)"
+          echo "=========================================================="
+          
+          ./bin/linux-x64/llama-cli \
+            -m "$DECODER_PATH" \
+            --mmproj "$MMPROJ_PATH" \
+            --audio audio_input.wav \
+            -p "$PROMPT" \
+            -t $(nproc) \
+            -c 8192 \
+            --no-warmup > nemotron_transcript.txt 2> nemotron_log.txt || true
+          
+          echo "=== Hasil Transkripsi Nemotron (10 Baris Pertama) ==="
+          head -n 20 nemotron_transcript.txt || true
+          
+          echo "=== Cuplikan Log Inferensi ==="
+          tail -n 25 nemotron_log.txt || true
+
+      # ── 7. Ringkasan Hasil ke GitHub Step Summary ───────────────────────────
+      - name: Log Step Summary
+        if: always()
+        env:
+          TITLE: ${{ matrix.title }}
+          ITEM_ID: ${{ matrix.item_id }}
+          QUANT: ${{ inputs.quant_level || 'Q2_0' }}
+          SAMPLE_MIN: ${{ inputs.sample_duration_min || '5' }}
+        run: |
+          echo "### 🎙️ Hasil Uji Coba Nemotron 3.5 Transcribe (CPU-Only): $TITLE" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Archive Item ID**: [\`$ITEM_ID\`](https://archive.org/details/$ITEM_ID)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Kuantisasi GGUF**: \`$QUANT\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Durasi Sampel**: \`$SAMPLE_MIN menit\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Hardware**: CPU murni (2 vCPU runner, tanpa GPU)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          
+          if [ -s nemotron_transcript.txt ]; then
+            echo "#### 📜 Teks Transkripsi yang Dihasilkan:" >> "$GITHUB_STEP_SUMMARY"
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            cat nemotron_transcript.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          
+          if [ -s nemotron_log.txt ]; then
+            echo "<details><summary>📊 Metrik Kecepatan & Log Inferensi</summary>" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            tail -n 40 nemotron_log.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "</details>" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ── 8. Simpan Artifact Hasil Uji Coba ───────────────────────────────────
+      - name: Upload Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nemotron-cpu-${{ matrix.item_id }}
+          path: |
+            nemotron_transcript.txt
+            nemotron_log.txt
+          retention-days: 7
