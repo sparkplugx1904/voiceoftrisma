@@ -78,10 +78,37 @@ try:
 except Exception as e:
     print(f"\n[ERROR] Koneksi atau inferensi gagal: {e}", flush=True)
 
-full_text = "".join(collected)
+full_text = "".join(collected).strip()
+
+# Parsing dan format rapi (indent=2) agar tidak terpotong satu baris di konsol log
+final_json_str = full_text
+try:
+    decoder = json.JSONDecoder()
+    text = full_text
+    idx = 0
+    objs = []
+    while idx < len(text):
+        while idx < len(text) and text[idx].isspace():
+            idx += 1
+        if idx >= len(text):
+            break
+        obj, end = decoder.raw_decode(text, idx)
+        objs.append(obj)
+        idx = end
+
+    if objs:
+        combined = {}
+        for o in objs:
+            if isinstance(o, dict):
+                combined.update(o)
+        if "programs" in combined or "title" in combined:
+            final_json_str = json.dumps(combined, indent=2, ensure_ascii=False)
+except Exception:
+    pass
+
 with open(out_file, "w", encoding="utf-8") as f:
-    f.write(full_text)
+    f.write(final_json_str)
 
 print("\n\n" + "=" * 65, flush=True)
-print(f"[ SUCCESS ] Selesai! Respon disimpan ke {out_file} ({len(full_text):,} karakter)", flush=True)
+print(f"[ SUCCESS ] Selesai! Respon disimpan ke {out_file} ({len(final_json_str):,} karakter)", flush=True)
 print("=" * 65, flush=True)

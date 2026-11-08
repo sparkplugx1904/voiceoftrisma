@@ -5,7 +5,7 @@ KELUARAN
 Hanya SATU objek JSON valid. Tanpa kalimat pembuka/penutup, tanpa ```, tanpa komentar.
 Skema (nama kunci harus persis):
 {"title": "...", "description": "...", "programs": [{"program": "...", "announcer": "...", "timestamp": "HH:MM:SS", "topic": "...", "description": "..."}]}
-Aturan JSON: tanpa koma sisa (trailing comma), tanpa baris baru di dalam string, kutipan di dalam teks pakai tanda petik tunggal '...', semua nilai bertipe string.
+Aturan JSON: seluruh field ('title', 'description', dan 'programs') WAJIB berada di dalam SATU objek {...} tunggal, DILARANG menutup kurung kurawal '}' sebelum array 'programs' selesai ditulis; tanpa koma sisa (trailing comma); tanpa baris baru di dalam string; kutipan di dalam teks pakai tanda petik tunggal '...'; semua nilai bertipe string.
 
 ATURAN 1: SUMBER FAKTA TUNGGAL
 Satu-satunya sumber fakta adalah transkrip. DILARANG menambah fakta dari pengetahuan luar (kota, tahun, genre, peringkat, tanggal rilis, makna lagu, profil artis, dll). Jika tidak diucapkan di transkrip, jangan ditulis. Lebih baik ringkas dan benar daripada panjang tapi mengarang.
@@ -47,8 +47,9 @@ Tidak ada daftar penyiar. Penyiar berganti dari waktu ke waktu; temukan namanya 
 - Jangan pernah memakai nama dari contoh di prompt ini atau mengarang nama. Jika setelah menelusuri seluruh transkrip nama benar-benar tidak bisa dipastikan, tulis "Tidak teridentifikasi".
 
 ATURAN 4: KOREKSI TYPO
-Perbaiki ejaan nama orang, judul lagu, artis, judul film, nama program, dan istilah sekolah memakai konteks dan kemiripan bunyi, TANPA mengubah fakta. Jika ejaan sebuah nama tidak pasti, pakai versi yang paling konsisten di transkrip; jangan menebak nama baru yang tidak pernah muncul.
-Istilah sekolah/komunitas: Voice of Trisma (VOT); sapaan "Sobat Trisma"; Madyapadma (unit pers/jurnalistik sekolah); SMA Negeri 3 Denpasar; TKA (Tes Kemampuan Akademik); Duta Trisma. Daftar istilah ini boleh bertambah; istilah lain yang muncul ditulis sesuai pendengaran terbaik.
+Perbaiki ejaan nama orang, judul lagu, artis, judul film, nama program, dan istilah sekolah memakai konteks dan kemiripan bunyi, TANPA mengubah fakta.
+- Prinsip Konsistensi Mayoritas: Jika suatu nama orang, nama lomba/ajang, atau singkatan diucapkan dengan beberapa variasi ejaan oleh Whisper (misalnya ada satu baris salah dengar menjadi kata umum bahasa Indonesia, namun di baris-baris lain diucapkan berulang kali dengan singkatan/ejaan berbeda), WAJIB gunakan variasi ejaan yang PALING SERING dan KONSISTEN muncul di transkrip. Jangan memilih kata umum bahasa Indonesia jika transkrip berulang kali membicarakan nama/singkatan khusus.
+- Istilah sekolah/komunitas: Voice of Trisma (VOT); sapaan "Sobat Trisma"; Madyapadma (unit pers/jurnalistik sekolah); SMA Negeri 3 Denpasar; TKA (Tes Kemampuan Akademik); Duta Trisma. Daftar istilah ini boleh bertambah; istilah lain yang muncul ditulis sesuai pendengaran terbaik.
 
 ATURAN 5: MUSIK, JINGLE, DAN NOISE
 - Abaikan lirik lagu. Untuk lagu, catat judul dan artis HANYA jika disebut penyiar.
