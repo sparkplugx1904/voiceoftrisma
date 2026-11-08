@@ -52,6 +52,20 @@ DEFAULT_PROMPT = "Voice of Trisma, Madyapadma, Sobat Trisma, Profil Siswa Berpre
 
 # --- Fungsi Inti ---
 
+def is_real_binary(path: Path, min_size: int = 1000) -> bool:
+    """Periksa apakah file ada, bukan file kosong, dan bukan Git LFS pointer text (anti Errno 8)."""
+    if not path.is_file() or path.stat().st_size < min_size:
+        return False
+    try:
+        with open(path, "rb") as f:
+            header = f.read(16)
+            if header.startswith(b"version https://"):
+                return False
+    except Exception:
+        return False
+    return True
+
+
 def check_dependencies() -> Tuple[Path, Path]:
     """Memeriksa dependensi eksternal 'curl', 'ffmpeg', dan 'whisper-cli'."""
     if os.name != 'nt':
@@ -65,33 +79,29 @@ def check_dependencies() -> Tuple[Path, Path]:
         dependencies_ok = False
         
     # 2. Cek ffmpeg
+    # 2. Cek ffmpeg: prioritaskan ffmpeg bawaan runner (/usr/bin/ffmpeg) agar kebal pointer LFS
     ffmpeg_bin = None
-    if os.name == 'nt':
-        ffmpeg_candidates = [
-            Path("bin/win-x64/ffmpeg.exe"),
-            Path("bin/win64/ffmpeg.exe"),
-            Path("bin/ffmpeg.exe"),
-            Path("ffmpeg.exe"),
-        ]
+    if shutil.which("ffmpeg"):
+        ffmpeg_bin = Path(shutil.which("ffmpeg")).resolve()
+
+    if not ffmpeg_bin:
+        if os.name == 'nt':
+            ffmpeg_candidates = [
+                Path("bin/win-x64/ffmpeg.exe"),
+                Path("bin/win64/ffmpeg.exe"),
+                Path("bin/ffmpeg.exe"),
+                Path("ffmpeg.exe"),
+            ]
+        else:
+            ffmpeg_candidates = [
+                Path("bin/linux-x64/ffmpeg"),
+                Path("bin/ffmpeg"),
+                Path("ffmpeg"),
+            ]
         for c in ffmpeg_candidates:
-            if c.exists():
+            if is_real_binary(c):
                 ffmpeg_bin = c.resolve()
                 break
-        if not ffmpeg_bin and shutil.which("ffmpeg"):
-            ffmpeg_bin = Path(shutil.which("ffmpeg")).resolve()
-    else:
-        ffmpeg_candidates = [
-            Path("bin/linux-x64/ffmpeg"),
-            Path("bin/ffmpeg"),
-            Path("ffmpeg"),
-        ]
-        for c in ffmpeg_candidates:
-            if c.exists():
-                ffmpeg_bin = c.resolve()
-                break
-        if not ffmpeg_bin and shutil.which("ffmpeg"):
-            ffmpeg_bin = Path(shutil.which("ffmpeg")).resolve()
-        
     if not ffmpeg_bin:
         log_error("'ffmpeg' tidak ditemukan. Pastikan ffmpeg terpasang.")
         dependencies_ok = False
@@ -135,9 +145,23 @@ def check_dependencies() -> Tuple[Path, Path]:
     return whisper_cli_path, ffmpeg_bin
     
 def download_file(url: str, dest: Path) -> bool:
-    """Mengunduh file menggunakan curl."""
+    """Mengunduh file menggunakan aria2c (jika ada) atau curl."""
     log_info(f"Mengunduh: {url} -> {dest}")
     os.makedirs(dest.parent, exist_ok=True)
+    if shutil.which("aria2c"):
+        try:
+            cmd = [
+                "aria2c", "-x", "16", "-s", "16", "-k", "1M",
+                "--file-allocation=none", "--summary-interval=5",
+                "--console-log-level=warn",
+                "-d", str(dest.parent), "-o", dest.name, url
+            ]
+            subprocess.run(cmd, check=True)
+            log_success(f"Unduhan selesai via aria2c: {dest}")
+            return True
+        except Exception as e:
+            log_warn(f"aria2c gagal ({e}), mencoba fallback ke curl...")
+
     try:
         subprocess.run(
             [
@@ -159,6 +183,8 @@ def download_file(url: str, dest: Path) -> bool:
         return False
     except Exception as e:
         log_error(f"Terjadi error tak terduga saat mengunduh: {e}", exit_app=False)
+        if dest.exists():
+            dest.unlink()
         return False
 def ensure_model_exists(model_name: str, custom_model_url: Optional[str]) -> Path:
     """Memastikan model GGML/GGUF ada di folder ./models/."""
@@ -178,7 +204,7 @@ def ensure_model_exists(model_name: str, custom_model_url: Optional[str]) -> Pat
         model_path = Path(f"./models/{model_filename}")
         log_info(f"Memeriksa model kustom di cache: {model_path}")
         
-        if model_path.exists():
+        if is_real_binary(model_path, min_size=1_000_000):
             log_success(f"Model kustom ditemukan di cache: {model_path}")
             return model_path
         
@@ -195,8 +221,8 @@ def ensure_model_exists(model_name: str, custom_model_url: Optional[str]) -> Pat
         os.makedirs("models", exist_ok=True)
         model_path = Path(f"./models/ggml-{model_name}.bin")
         
-        if model_path.exists():
-            log_success(f"Model ditemukan: {model_path}")
+        if is_real_binary(model_path, min_size=1_000_000):
+            log_success(f"Model ditemukan: {model_path} ({model_path.stat().st_size / (1024 * 1024):.1f} MB)")
             return model_path
         
         log_warn(f"Model standar '{model_name}' belum ada, mengunduh...")
