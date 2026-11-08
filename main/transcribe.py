@@ -148,7 +148,9 @@ def download_file(url: str, dest: Path) -> bool:
     """Mengunduh file menggunakan aria2c (jika ada) atau curl."""
     log_info(f"Mengunduh: {url} -> {dest}")
     os.makedirs(dest.parent, exist_ok=True)
-    if shutil.which("aria2c"):
+    # aria2c multi-thread (16 koneksi) hanya untuk Hugging Face CDN (model AI besar)
+    # Audio dari Archive.org / Cloudflare Worker wajib pakai curl single-stream agar tidak terkena throttling/rate-limit!
+    if "huggingface.co" in url and shutil.which("aria2c"):
         try:
             cmd = [
                 "aria2c", "-x", "16", "-s", "16", "-k", "1M",
