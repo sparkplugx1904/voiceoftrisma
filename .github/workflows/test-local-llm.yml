@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       model_url:
-        description: "URL download model GGUF (14B: bartowski/Qwen2.5-14B-Instruct-GGUF, 27B: unsloth/Qwen3.8-27B-GGUF, 7B: bartowski/Qwen2.5-7B-Instruct-GGUF)"
+        description: "URL download model GGUF (DeepSeek-R1-Distill-Qwen-14B)"
         required: false
-        default: "https://huggingface.co/bartowski/Qwen2.5-14B-Instruct-GGUF/resolve/main/Qwen2.5-14B-Instruct-Q4_K_M.gguf"
+        default: "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf"
       model_filename:
         description: "Nama file model GGUF"
         required: false
-        default: "Qwen2.5-14B-Instruct-Q4_K_M.gguf"
+        default: "DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf"
       sample_item:
         description: "Archive.org Item ID untuk mengambil transkrip sampel (Jumat: vot-denpasar-20261106-183004, Sabtu: vot-denpasar-20261031-183004)"
         required: false
@@ -107,7 +107,6 @@ jobs:
             -ub 256 \
             -t $(nproc) \
             --jinja \
-            --chat-template-kwargs '{"enable_thinking":false}' \
             --port 8080 > server.log 2>&1 &
 
           echo "[ INFO ] Menunggu server siap merespons..."
@@ -137,9 +136,17 @@ jobs:
           echo "=== Hasil out.json ==="
           cat out.json
 
-          echo "### 🧠 Hasil Eksekusi Local LLM Qwen3.8-27B" >> $GITHUB_STEP_SUMMARY
-          echo "- **Model**: \`${{ inputs.model_filename }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "### 🧠 Hasil Eksekusi Local LLM (${{ inputs.model_filename }})" >> $GITHUB_STEP_SUMMARY
           echo "- **Sample Item**: [\`${{ inputs.sample_item }}\`](https://archive.org/details/${{ inputs.sample_item }})" >> $GITHUB_STEP_SUMMARY
+          if [ -s think.txt ]; then
+            echo "<details><summary>💭 Lihat Jalur Penalaran (&lt;think&gt; trace)</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            cat think.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "#### 📄 Output JSON Terformat:" >> $GITHUB_STEP_SUMMARY
           echo '```json' >> $GITHUB_STEP_SUMMARY
           cat out.json >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -151,7 +158,7 @@ jobs:
           name: test-local-llm-output
           path: |
             out.json
+            think.txt
             clean.txt
             server.log
-          if-no-files-found: ignore
           retention-days: 7

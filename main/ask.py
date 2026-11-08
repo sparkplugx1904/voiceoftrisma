@@ -1,8 +1,7 @@
 import json
 import os
+import re
 import sys
-import time
-import threading
 import urllib.request
 from urllib.parse import urlparse
 
@@ -10,6 +9,7 @@ prompt_file = sys.argv[1] if len(sys.argv) > 1 else "main/prompt.txt"
 clean_file = sys.argv[2] if len(sys.argv) > 2 else "clean.txt"
 out_file = sys.argv[3] if len(sys.argv) > 3 else "out.json"
 server_url = sys.argv[4] if len(sys.argv) > 4 else "http://127.0.0.1:8080/v1/chat/completions"
+think_file = "think.txt"
 
 sys_prompt = open(prompt_file, encoding="utf-8").read()
 tr = open(clean_file, encoding="utf-8").read()
@@ -25,16 +25,15 @@ print(f"[ INFO ] Estimasi total input   : ~{total_tokens_est:,} token", flush=Tr
 print(f"[ INFO ] Server target          : {server_url}", flush=True)
 print("=" * 65, flush=True)
 
+# DeepSeek-R1 membutuhkan alokasi token yang lega untuk penalaran (<think>) + JSON utuh
 body = {
     "messages": [
         {"role": "system", "content": sys_prompt},
         {"role": "user", "content": "Transkrip:\n" + tr}
     ],
-    "temperature": 0.7,
-    "top_p": 0.8,
-    "top_k": 20,
-    "presence_penalty": 1.5,
-    "max_tokens": 3000,
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "max_tokens": 8192,
     "stream": True
 }
 
@@ -45,7 +44,8 @@ req = urllib.request.Request(
 )
 
 print("[ INFO ] Mengirim request ke llama-server...", flush=True)
-print("[ INFO ] Menunggu pemrosesan prompt di CPU... Token JSON akan langsung mengalir di bawah begitu inferensi dimulai:\n", flush=True)
+print("[ INFO ] Menunggu pemrosesan prompt di CPU... Aliran penalaran (<think>) dan token JSON akan langsung mengalir di bawah:\n", flush=True)
+
 collected = []
 first_token = False
 
@@ -68,8 +68,8 @@ try:
                         if chunk:
                             if not first_token:
                                 first_token = True
-                                print("\n" + "=" * 65, flush=True)
-                                print("[ LIVE STREAM ] Token mulai dihasilkan:", flush=True)
+                                print("=" * 65, flush=True)
+                                print("[ LIVE STREAM ] Aliran token aktif:", flush=True)
                                 print("=" * 65, flush=True)
                             print(chunk, end="", flush=True)
                             collected.append(chunk)
@@ -80,35 +80,64 @@ except Exception as e:
 
 full_text = "".join(collected).strip()
 
-# Parsing dan format rapi (indent=2) agar tidak terpotong satu baris di konsol log
-final_json_str = full_text
-try:
-    decoder = json.JSONDecoder()
-    text = full_text
-    idx = 0
-    objs = []
-    while idx < len(text):
-        while idx < len(text) and text[idx].isspace():
-            idx += 1
-        if idx >= len(text):
-            break
-        obj, end = decoder.raw_decode(text, idx)
-        objs.append(obj)
-        idx = end
+# ── 1. Ekstrak dan Simpan Jalur Penalaran (<think>...</think>) ─────────────────
+think_text = ""
+json_raw = full_text
 
-    if objs:
-        combined = {}
-        for o in objs:
-            if isinstance(o, dict):
-                combined.update(o)
-        if "programs" in combined or "title" in combined:
-            final_json_str = json.dumps(combined, indent=2, ensure_ascii=False)
+think_match = re.search(r"<think>(.*?)(?:</think>|$)", full_text, re.DOTALL)
+if think_match:
+    think_text = think_match.group(1).strip()
+    with open(think_file, "w", encoding="utf-8") as f:
+        f.write(think_text)
+    print(f"\n\n[ INFO ] Jalur penalaran (<think>) dipisahkan dan disimpan ke {think_file} ({len(think_text):,} karakter)", flush=True)
+
+# Ambil bagian teks murni setelah </think>
+if "</think>" in full_text:
+    json_raw = full_text.split("</think>")[-1].strip()
+elif "<think>" in full_text and "</think>" not in full_text:
+    json_raw = full_text
+
+# Bersihkan markdown fence ```json jika ada
+json_raw = re.sub(r"^```(?:json)?\s*", "", json_raw, flags=re.MULTILINE)
+json_raw = re.sub(r"\s*```$", "", json_raw, flags=re.MULTILINE).strip()
+
+# ── 2. Parsing & Format JSON Berlekuk (indent=2) ──────────────────────────────
+final_json_str = json_raw
+parsed = None
+
+# Cari blok {...} terluar
+json_match = re.search(r"\{.*\}", json_raw, re.DOTALL)
+candidate = json_match.group(0).strip() if json_match else json_raw
+
+try:
+    parsed = json.loads(candidate)
 except Exception:
-    pass
+    try:
+        decoder = json.JSONDecoder()
+        text = candidate
+        idx = 0
+        objs = []
+        while idx < len(text):
+            while idx < len(text) and text[idx].isspace(): idx += 1
+            if idx >= len(text): break
+            obj, end = decoder.raw_decode(text, idx)
+            objs.append(obj)
+            idx = end
+        if objs:
+            combined = {}
+            for o in objs:
+                if isinstance(o, dict): combined.update(o)
+            if "programs" in combined or "title" in combined:
+                parsed = combined
+    except Exception:
+        pass
+
+if parsed and isinstance(parsed, dict):
+    final_json_str = json.dumps(parsed, indent=2, ensure_ascii=False)
 
 with open(out_file, "w", encoding="utf-8") as f:
     f.write(final_json_str)
 
 print("\n\n" + "=" * 65, flush=True)
-print(f"[ SUCCESS ] Selesai! Respon disimpan ke {out_file} ({len(final_json_str):,} karakter)", flush=True)
+print(f"[ SUCCESS ] Selesai! JSON valid berlekuk disimpan ke {out_file} ({len(final_json_str):,} karakter)", flush=True)
 print("=" * 65, flush=True)
