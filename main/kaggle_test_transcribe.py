@@ -416,6 +416,6 @@ if __name__ == "__main__":
                         help="Pilihan model: nemotron (NVIDIA Nemotron 3.5 30B) atau qwen3-omni (Qwen3-Omni 30B)")
     parser.add_argument("--chunk-minutes", type=int, default=20,
                         help="Durasi segmentasi audio dalam menit (default: 20 menit per potongan)")
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
     run_benchmark(engine=args.engine, max_chunk_minutes=args.chunk_minutes)
