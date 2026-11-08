@@ -133,6 +133,10 @@ except Exception:
         pass
 
 if parsed and isinstance(parsed, dict):
+    # Safety guard: Tolak 'Sobat Trisma' jika model secara keliru menganggap panggilan pendengar sebagai penyiar
+    for prog in parsed.get("programs", []):
+        if isinstance(prog, dict) and prog.get("announcer", "").strip().lower() in ("sobat trisma", "sobat triisma"):
+            prog["announcer"] = "Tidak teridentifikasi"
     final_json_str = json.dumps(parsed, indent=2, ensure_ascii=False)
 
 with open(out_file, "w", encoding="utf-8") as f:

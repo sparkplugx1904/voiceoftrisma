@@ -52,7 +52,8 @@ d. Jika benar-benar tidak ada nama program yang terucap, beri nama deskriptif si
 
 ATURAN 3: NAMA PENYIAR (DINAMIS, TANPA DAFTAR TETAP)
 Tidak ada daftar penyiar. Penyiar berganti dari waktu ke waktu; temukan namanya dari transkrip.
-- Sumber petunjuk: perkenalan diri ("aku ...", "bersama saya ..."), sapaan ("halo, ini ..."), penyebutan oleh rekan ("makasih ..."), salam penutup, dan sapaan pembuka seluruh siaran.
+- PERINGATAN MUTLAK 'SOBAT TRISMA': 'Sobat Trisma' adalah PANGGILAN KEPADA PENDENGAR (AUDIENS / KAMU / KALIAN), SAMA SEKALI BUKAN NAMA PENYIAR! DILARANG KERAS menulis 'Sobat Trisma' di field 'announcer'! DILARANG KERAS menjadikan 'Sobat Trisma' sebagai subjek pelaku di dalam field 'description' (misal: DILARANG 'Sobat Trisma mengenalkan...', DILARANG 'Sobat Trisma memutar...'). Penyiar adalah orang yang berbicara KEPADA Sobat Trisma.
+- Sumber petunjuk: perkenalan diri ("aku ...", "bareng aku ...", "bersama saya ...", "di sini ada ..."), sapaan ("halo, ini ..."), penyebutan oleh rekan atau narasumber ("seperti kata Kak ...", "terima kasih ..."), dan salam penutup.
 - Baca SELURUH transkrip sebelum memutuskan, karena nama sering disebut di awal siaran atau saat serah-terima antarprogram, bukan di awal segmennya.
 - Satu orang bisa disebut dengan beberapa ejaan oleh Whisper. Pilih ejaan yang paling sering muncul atau paling wajar sebagai nama orang Indonesia, lalu pakai ejaan YANG SAMA di semua segmen dan di semua deskripsi.
 - Segmen dengan dua penyiar: tulis keduanya, dipisah " dan ".
@@ -99,8 +100,8 @@ ATURAN 9: "title" DAN "description" UTAMA
 
 PEMERIKSAAN SEBELUM MENJAWAB
 1. Nama program: sudah benar sesuai Aturan 2? Program baru tidak dipaksa menjadi program lama?
-2. Nama penyiar: sudah ditelusuri dari seluruh transkrip, ejaan konsisten, tamu tidak tercampur?
+2. Nama penyiar: DILARANG ADA 'Sobat Trisma'! Sudah dipastikan 'Sobat Trisma' TIDAK ditulis sebagai announcer atau subjek pelaku di description? Jika ada, GANTI dengan nama orang asli yang memandu acara!
 3. Adakah fakta, nama, judul, atau angka yang tidak ada di transkrip (termasuk yang menyerupai contoh di prompt ini)? Hapus.
 4. Adakah frasa terlarang di Aturan 8? Tulis ulang dengan nama dan detail konkret.
-5. Tiap program muncul sekali, urut waktu, timestamp berformat HH:MM:SS?
+5. Tiap program muncul sekali (DILARANG ada program dobel seperti dua 'Nonstop Music'; gabungkan atau bedakan Indo/Barat sesuai lagu yang diputar), urut waktu, timestamp berformat HH:MM:SS?
 6. Keluaran murni satu objek JSON valid, tanpa teks lain?
