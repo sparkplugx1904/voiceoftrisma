@@ -76,14 +76,16 @@ jobs:
           SAMPLE_ITEM: ${{ inputs.sample_item }}
         run: |
           mkdir -p transcripts
-          echo "[ INFO ] Mengunduh transcript untuk item: $SAMPLE_ITEM..."
-          curl -L -s -o transcripts/transcript.srt "https://archive.org/download/$SAMPLE_ITEM/transcript.srt" || true
-
-          # Cek jika file terunduh adalah error HTML atau kosong
-          if [ ! -s transcripts/transcript.srt ] || grep -qi "<html>\|<!DOCTYPE" transcripts/transcript.srt; then
-            echo "[ WARN ] Unduhan berupa HTML error atau kosong. Mengambil transkrip fallback valid..."
-            curl -L -s -o transcripts/transcript.srt "https://archive.org/download/vot-denpasar-20261008-183012/transcript.srt"
-          fi
+          python3 -c "
+          from pathlib import Path
+          from main.core.downloader import download_archive_file
+          import os, sys
+          item = os.environ['SAMPLE_ITEM']
+          url = f'https://archive.org/download/{item}/transcript.srt'
+          dest = Path('transcripts/transcript.srt')
+          if not download_archive_file(url, dest, is_text=True):
+              sys.exit(1)
+          "
           echo "[ INFO ] Membersihkan transkrip dengan main/clean.py..."
           python3 main/clean.py transcripts/transcript.srt > clean.txt
           echo "[ OK ] clean.txt selesai dibuat: $(wc -l < clean.txt) baris (seluruh durasi siaran ~2 jam penuh)."

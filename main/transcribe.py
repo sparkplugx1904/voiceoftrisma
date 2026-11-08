@@ -10,6 +10,14 @@ import traceback
 from pathlib import Path
 from typing import List, Tuple, Optional
 import argparse
+_MAIN_DIR = Path(__file__).resolve().parent
+if str(_MAIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_MAIN_DIR))
+
+try:
+    from core.downloader import download_archive_file, get_archive_proxy_url
+except ImportError:
+    from main.core.downloader import download_archive_file, get_archive_proxy_url
 
 if sys.platform == "win32":
     if hasattr(sys.stdout, "reconfigure"):
@@ -271,22 +279,14 @@ def get_archive_proxy_url(url: str) -> Optional[str]:
 
 def download_audio(url: str, output_path: Path):
     """
-    Wrapper untuk mengunduh file audio.
-    Mencoba via reverse proxy Cloudflare Worker terlebih dahulu untuk menghindari blokir/502
-    jaringan datacenter GitHub Actions oleh Archive.org, lalu fallback ke URL asli jika gagal.
+    Wrapper untuk mengunduh file audio siaran.
+    Mengutamakan Cloudflare Worker proxy untuk mencegah blokir/502/throttling
+    Archive.org dengan verifikasi Content-Length dan fallback URL langsung.
     """
-    proxy_url = get_archive_proxy_url(url)
-    if proxy_url:
-        log_info(f"Mengunduh audio via Cloudflare Worker proxy: {proxy_url}")
-        if download_file(proxy_url, output_path):
-            log_success(f"Audio berhasil diunduh via proxy ke {output_path}")
-            return
-        log_warn(f"Gagal via Cloudflare Worker proxy. Mencoba URL asli Archive.org: {url}")
-
-    log_info(f"Mengunduh audio dari: {url}")
-    if not download_file(url, output_path):
-        log_error("Gagal mengunduh audio. Membatalkan.", exit_app=True)
-    log_success(f"Audio berhasil diunduh ke {output_path}")
+    log_info(f"Mengunduh audio siaran: {url}")
+    if not download_archive_file(url, output_path, min_size=5_000_000, is_text=False):
+        log_error("Gagal mengunduh audio siaran dari seluruh kandidat. Membatalkan.", exit_app=True)
+    log_success(f"Audio berhasil diunduh ke {output_path} ({output_path.stat().st_size / (1024 * 1024):.1f} MB)")
 
 def preprocess_audio(input_path: Path, ffmpeg_bin: Path) -> Path:
     """

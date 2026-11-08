@@ -29,6 +29,14 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
+_MAIN_DIR = Path(__file__).resolve().parent
+if str(_MAIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_MAIN_DIR))
+
+try:
+    from core.downloader import download_archive_file, get_archive_proxy_url
+except ImportError:
+    from main.core.downloader import download_archive_file, get_archive_proxy_url
 try:
     from dotenv import load_dotenv
     _ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -417,52 +425,15 @@ def fix_description_item(
     srt_path = os.path.join(temp_dir, "transcript.srt")
     out_desc_path = os.path.join(transcripts_dir, "description.json")
 
-    def get_archive_proxy_url(u: str) -> Optional[str]:
-        archive_prefix = "https://archive.org/download/"
-        if u and u.startswith(archive_prefix):
-            subpath = u[len(archive_prefix):]
-            proxy_base = os.environ.get("CF_WORKER_PROXY_URL") or "https://voiceoftrisma.anandapradnyana68.workers.dev/archive/download"
-            return f"{proxy_base.rstrip('/')}/{subpath}"
-        return None
-
     try:
-        download_candidates = []
-        proxy_srt = get_archive_proxy_url(srt_url)
-        if proxy_srt:
-            download_candidates.append(proxy_srt)
-        download_candidates.append(srt_url)
-
-        downloaded = False
-        for u in download_candidates:
-            try:
-                log(f"Mengunduh transkrip dari: {u}")
-                req = urllib.request.Request(u, headers={"User-Agent": USER_AGENT})
-                with urllib.request.urlopen(req, timeout=30) as resp, open(srt_path, "wb") as out_file:
-                    shutil.copyfileobj(resp, out_file)
-                log(f"Transkrip berhasil diunduh ke: {srt_path} ({os.path.getsize(srt_path)} bytes)")
-                downloaded = True
-                break
-            except Exception as e:
-                log(f"[WARN] Gagal mengunduh {u}: {e}")
-
+        downloaded = download_archive_file(srt_url, Path(srt_path), is_text=True)
         if not downloaded:
             txt_url = f"https://archive.org/download/{item_id}/transcript.txt"
-            proxy_txt = get_archive_proxy_url(txt_url)
-            txt_candidates = [proxy_txt, txt_url] if proxy_txt else [txt_url]
-            for tu in txt_candidates:
-                try:
-                    log(f"Mencoba alternatif: {tu}")
-                    req_txt = urllib.request.Request(tu, headers={"User-Agent": USER_AGENT})
-                    with urllib.request.urlopen(req_txt, timeout=30) as resp, open(srt_path, "wb") as out_file:
-                        shutil.copyfileobj(resp, out_file)
-                    log(f"Transcript TXT berhasil diunduh ke: {srt_path}")
-                    downloaded = True
-                    break
-                except Exception as e2:
-                    log(f"[WARN] Gagal mengunduh alternatif {tu}: {e2}")
+            log(f"[INFO] Mencoba unduhan transkrip alternatif: {txt_url}")
+            downloaded = download_archive_file(txt_url, Path(srt_path), is_text=True)
 
         if not downloaded:
-            log(f"[FATAL] Gagal mengunduh transkrip untuk {item_id}.")
+            log(f"[FATAL] Gagal mengunduh transkrip valid untuk {item_id}.")
             sys.exit(1)
 
         if dry_run:
