@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       model_url:
-        description: "URL download model GGUF"
+        description: "URL download model GGUF (14B: bartowski/Qwen2.5-14B-Instruct-GGUF, 27B: unsloth/Qwen3.8-27B-GGUF, 7B: bartowski/Qwen2.5-7B-Instruct-GGUF)"
         required: false
-        default: "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/main/Qwen3.8-27B-UD-Q4_K_XL.gguf"
+        default: "https://huggingface.co/bartowski/Qwen2.5-14B-Instruct-GGUF/resolve/main/Qwen2.5-14B-Instruct-Q4_K_M.gguf"
       model_filename:
         description: "Nama file model GGUF"
         required: false
-        default: "Qwen3.8-27B-UD-Q4_K_XL.gguf"
+        default: "Qwen2.5-14B-Instruct-Q4_K_M.gguf"
       sample_item:
         description: "Archive.org Item ID untuk mengambil transkrip sampel (Jumat: vot-denpasar-20261106-183004, Sabtu: vot-denpasar-20261031-183004)"
         required: false
