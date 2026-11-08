@@ -50,6 +50,7 @@ scratch/
 *.srt
 *.wav
 
+eval_results/
 # --- Downloaded AI Models (Whisper GGML/GGUF) ---
 !models/
 !models/*.bin

@@ -9,11 +9,14 @@ on:
         required: true
         default: "gpt-oss-20b"
         options:
+          - "qwen3.6-35b-q5"
+          - "qwen3.6-35b-q6"
+          - "qwen3.6-35b-q8"
+          - "qwen3.6-35b-claude-opus"
           - "gpt-oss-20b"
           - "qwen3-4b-thinking"
           - "qwen3-30b-thinking-q3"
           - "qwen3-14b-claude-opus"
-          - "qwen3.6-35b-claude-opus"
           - "deepseek-r1-14b"
           - "custom"
       reasoning_effort:
@@ -88,45 +91,69 @@ jobs:
           CUSTOM_URL="${{ inputs.model_url }}"
           CUSTOM_FILENAME="${{ inputs.model_filename }}"
           USER_REASONING="${{ inputs.reasoning_effort }}"
-
+          SWAP_SIZE="24G"
           case "$PRESET" in
             "gpt-oss-20b")
               URL="https://huggingface.co/unsloth/gpt-oss-20b-GGUF/resolve/main/gpt-oss-20b-Q4_K_M.gguf"
               FILENAME="gpt-oss-20b-Q4_K_M.gguf"
               DEFAULT_REASONING="high"
+              SWAP_SIZE="24G"
               ;;
             "qwen3-4b-thinking")
               URL="https://huggingface.co/unsloth/Qwen3-4B-Thinking-2507-GGUF/resolve/main/Qwen3-4B-Thinking-2507-Q4_K_M.gguf"
               FILENAME="Qwen3-4B-Thinking-2507-Q4_K_M.gguf"
               DEFAULT_REASONING=""
+              SWAP_SIZE="16G"
               ;;
             "qwen3-30b-thinking-q3")
               URL="https://huggingface.co/unsloth/Qwen3-30B-A3B-Thinking-2507-GGUF/resolve/main/Qwen3-30B-A3B-Thinking-2507-Q3_K_M.gguf"
               FILENAME="Qwen3-30B-A3B-Thinking-2507-Q3_K_M.gguf"
               DEFAULT_REASONING=""
+              SWAP_SIZE="24G"
               ;;
             "qwen3-14b-claude-opus")
               URL="https://huggingface.co/TeichAI/Qwen3-14B-Claude-4.5-Opus-High-Reasoning-Distill-GGUF/resolve/main/Qwen3-14B-Claude-4.5-Opus-Distill.q4_k_m.gguf"
               FILENAME="Qwen3-14B-Claude-4.5-Opus-Distill.q4_k_m.gguf"
               DEFAULT_REASONING=""
+              SWAP_SIZE="24G"
               ;;
-            "qwen3.6-35b-claude-opus")
+            "qwen3.6-35b-q5")
+              URL="https://huggingface.co/hesamation/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-GGUF/resolve/main/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled.Q5_K_M.gguf"
+              FILENAME="Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled.Q5_K_M.gguf"
+              DEFAULT_REASONING=""
+              SWAP_SIZE="28G"
+              ;;
+            "qwen3.6-35b-q6")
+              URL="https://huggingface.co/hesamation/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-GGUF/resolve/main/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled.Q6_K.gguf"
+              FILENAME="Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled.Q6_K.gguf"
+              DEFAULT_REASONING=""
+              SWAP_SIZE="32G"
+              ;;
+            "qwen3.6-35b-q8")
+              URL="https://huggingface.co/hesamation/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-GGUF/resolve/main/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled.Q8_0.gguf"
+              FILENAME="Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled.Q8_0.gguf"
+              DEFAULT_REASONING=""
+              SWAP_SIZE="40G"
+              ;;
+            "qwen3.6-35b-claude-opus"|"qwen3.6-35b-q4")
               URL="https://huggingface.co/hesamation/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-GGUF/resolve/main/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled.Q4_K_M.gguf"
               FILENAME="Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled.Q4_K_M.gguf"
               DEFAULT_REASONING=""
+              SWAP_SIZE="24G"
               ;;
             "deepseek-r1-14b")
               URL="https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf"
               FILENAME="DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf"
               DEFAULT_REASONING=""
+              SWAP_SIZE="24G"
               ;;
             *)
               URL=""
               FILENAME=""
               DEFAULT_REASONING=""
+              SWAP_SIZE="24G"
               ;;
           esac
-
           # Override jika disediakan secara manual
           if [ -n "$CUSTOM_URL" ]; then
             URL="$CUSTOM_URL"
@@ -149,21 +176,22 @@ jobs:
           echo "RESOLVED_MODEL_URL=$URL" >> $GITHUB_ENV
           echo "RESOLVED_MODEL_FILENAME=$FILENAME" >> $GITHUB_ENV
           echo "RESOLVED_REASONING_EFFORT=$REASONING" >> $GITHUB_ENV
+          echo "RESOLVED_SWAP_SIZE=$SWAP_SIZE" >> $GITHUB_ENV
 
           echo "=== Konfigurasi Model Terpilih ==="
           echo "Preset           : $PRESET"
           echo "Model Filename   : $FILENAME"
           echo "Model URL        : $URL"
           echo "Reasoning Effort : $REASONING"
-
+          echo "Swap Size        : $SWAP_SIZE"
       # ── 2. Alokasi Swap 24GB untuk Llama Server ────────────────────────────
       - name: Configure 24GB Swap
         run: |
           echo "=== Membersihkan Ruang Disk Runner ==="
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift 2>/dev/null || true
           df -h /
-          echo "Mengalokasikan 24GB swapfile tambahan secara instan..."
-          sudo fallocate -l 24G /swapfile_extra || sudo dd if=/dev/zero of=/swapfile_extra bs=1M count=24576
+          echo "Mengalokasikan ${RESOLVED_SWAP_SIZE:-24G} swapfile tambahan secara instan..."
+          sudo fallocate -l "${RESOLVED_SWAP_SIZE:-24G}" /swapfile_extra || sudo dd if=/dev/zero of=/swapfile_extra bs=1M count=24576
           sudo chmod 600 /swapfile_extra
           sudo mkswap /swapfile_extra
           sudo swapon /swapfile_extra
