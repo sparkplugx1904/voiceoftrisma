@@ -148,19 +148,36 @@ def download_file(url: str, dest: Path) -> bool:
     """Mengunduh file menggunakan aria2c (jika ada) atau curl."""
     log_info(f"Mengunduh: {url} -> {dest}")
     os.makedirs(dest.parent, exist_ok=True)
+    # Hapus file lama atau pointer Git LFS jika bukan binary valid agar aria2c tidak membuat file .1
+    if dest.exists() and not is_real_binary(dest, min_size=1_000_000):
+        try:
+            dest.unlink()
+        except Exception:
+            pass
+
     # aria2c multi-thread (16 koneksi) hanya untuk Hugging Face CDN (model AI besar)
     # Audio dari Archive.org / Cloudflare Worker wajib pakai curl single-stream agar tidak terkena throttling/rate-limit!
     if "huggingface.co" in url and shutil.which("aria2c"):
         try:
             cmd = [
                 "aria2c", "-x", "16", "-s", "16", "-k", "1M",
+                "--allow-overwrite=true", "--auto-file-renaming=false",
                 "--file-allocation=none", "--summary-interval=5",
                 "--console-log-level=warn",
                 "-d", str(dest.parent), "-o", dest.name, url
             ]
             subprocess.run(cmd, check=True)
-            log_success(f"Unduhan selesai via aria2c: {dest}")
-            return True
+            # Self-healing jika aria2c tetap membuat file .1
+            dot_one = dest.parent / f"{dest.stem}.1{dest.suffix}"
+            if dot_one.exists() and (not dest.exists() or not is_real_binary(dest, min_size=1_000_000)):
+                if dest.exists():
+                    dest.unlink()
+                dot_one.replace(dest)
+
+            if is_real_binary(dest, min_size=1_000_000):
+                log_success(f"Unduhan selesai via aria2c: {dest}")
+                return True
+            log_warn("Hasil unduhan aria2c bukan binary valid, mencoba fallback ke curl...")
         except Exception as e:
             log_warn(f"aria2c gagal ({e}), mencoba fallback ke curl...")
 
@@ -226,9 +243,14 @@ def ensure_model_exists(model_name: str, custom_model_url: Optional[str]) -> Pat
         if is_real_binary(model_path, min_size=1_000_000):
             log_success(f"Model ditemukan: {model_path} ({model_path.stat().st_size / (1024 * 1024):.1f} MB)")
             return model_path
-        
+        if model_path.exists() and not is_real_binary(model_path, min_size=1_000_000):
+            try:
+                model_path.unlink()
+            except Exception:
+                pass
+
         log_warn(f"Model standar '{model_name}' belum ada, mengunduh...")
-        url = f"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{model_name}.bin" 
+        url = f"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{model_name}.bin"
         if not download_file(url, model_path):
             log_error("Gagal mengunduh model standar. Membatalkan.", exit_app=True)
             
