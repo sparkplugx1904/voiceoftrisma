@@ -1,29 +1,31 @@
-name: 🧪 Test Parallel Transcription (Whisper)
+name: 🧪 Test Parallel Local LLM (DeepSeek R1)
 
 on:
   workflow_dispatch:
     inputs:
-      whisper_model:
-        description: "Model Whisper-CPP untuk transkripsi"
+      model_url:
+        description: "URL download model GGUF (DeepSeek-R1-Distill-Qwen-14B)"
         required: false
-        default: "small"
-        type: choice
-        options:
-          - small
-          - medium
-          - base
-          - tiny
+        default: "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf"
+      model_filename:
+        description: "Nama file model GGUF"
+        required: false
+        default: "DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf"
+      context_size:
+        description: "Kapasitas context size (tokens)"
+        required: false
+        default: "32768"
 
 permissions:
   contents: read
 
 concurrency:
-  group: test-transcript-parallel-${{ github.ref }}
+  group: test-parallel-llm-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  transcribe_parallel:
-    name: "🎙️ ${{ matrix.title }} (${{ matrix.item_id }})"
+  test_llm_parallel:
+    name: "🧠 ${{ matrix.title }} (${{ matrix.item_id }})"
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
@@ -34,27 +36,22 @@ jobs:
         include:
           - item_id: "vot-denpasar-20261107-183001"
             title: "VOT Denpasar - Sabtu, 07 November 2026"
-            audio_url: "https://archive.org/download/vot-denpasar-20261107-183001/VOT-Denpasar_07-11-26-0.mp3"
             date: "2026-11-07"
 
           - item_id: "vot-denpasar-20261106-183004"
             title: "VOT Denpasar - Jumat, 06 November 2026"
-            audio_url: "https://archive.org/download/vot-denpasar-20261106-183004/VOT-Denpasar_06-11-26-0.mp3"
             date: "2026-11-06"
 
           - item_id: "vot-denpasar-20261105-183010"
             title: "VOT Denpasar - Kamis, 05 November 2026"
-            audio_url: "https://archive.org/download/vot-denpasar-20261105-183010/VOT-Denpasar_05-11-26-0.mp3"
             date: "2026-11-05"
 
           - item_id: "vot-denpasar-20261103-183002"
             title: "VOT Denpasar - Selasa, 03 November 2026"
-            audio_url: "https://archive.org/download/vot-denpasar-20261103-183002/VOT-Denpasar_03-11-26-0.mp3"
             date: "2026-11-03"
 
           - item_id: "vot-denpasar-20261102-183004"
             title: "VOT Denpasar - Senin, 02 November 2026"
-            audio_url: "https://archive.org/download/vot-denpasar-20261102-183004/VOT-Denpasar_02-11-26-0.mp3"
             date: "2026-11-02"
 
     steps:
@@ -66,151 +63,150 @@ jobs:
         with:
           python-version: "3.x"
 
-      # ── 1. Setup Lingkungan Whisper-CPP & FFmpeg ───────────────────────────
-      - name: Setup Transcription Environment
+      # ── 1. Alokasi Swap 24GB untuk Llama Server ────────────────────────────
+      - name: Configure 24GB Swap
         run: |
-          python main/setup.py transcript
+          echo "=== Ruang Disk Runner ==="
+          df -h /
+          echo "Mengalokasikan 24GB swapfile tambahan secara instan..."
+          sudo fallocate -l 24G /swapfile_extra || sudo dd if=/dev/zero of=/swapfile_extra bs=1M count=24576
+          sudo chmod 600 /swapfile_extra
+          sudo mkswap /swapfile_extra
+          sudo swapon /swapfile_extra
+          echo "=== Status Memori & Swap ==="
+          free -h
 
-      # ── 2. Download Audio & Transcribe dengan Whisper.cpp ──────────────────
-      - name: Transcribe Audio
+      # ── 2. Download Model GGUF dengan aria2c (16 Koneksi Paralel) ──────────
+      - name: Download GGUF Model with aria2
+        env:
+          MODEL_URL: ${{ inputs.model_url }}
+          MODEL_FILENAME: ${{ inputs.model_filename }}
+        run: |
+          mkdir -p "$HOME/qwen"
+          MODEL_PATH="$HOME/qwen/$MODEL_FILENAME"
+          echo "[ INFO ] Menginstal aria2..."
+          sudo apt-get update -qq && sudo apt-get install -y -qq aria2
+
+          echo "[ INFO ] Mengunduh model via aria2c (16 thread paralel)..."
+          aria2c -x 16 -s 16 -k 1M --file-allocation=none \
+            --allow-overwrite=true --auto-file-renaming=false \
+            --summary-interval=5 --console-log-level=warn \
+            -d "$HOME/qwen" -o "$MODEL_FILENAME" "$MODEL_URL"
+
+          echo "[ OK ] Download selesai:"
+          ls -lh "$MODEL_PATH"
+
+      # ── 3. Ambil Transkrip yang Sudah Ada di Archive.org & Jalankan clean.py ─
+      - name: Prepare Existing Transcript from Archive.org
         env:
           ITEM_ID: ${{ matrix.item_id }}
-          AUDIO_URL: ${{ matrix.audio_url }}
-          WHISPER_MODEL: ${{ inputs.whisper_model || 'small' }}
         run: |
-          MODEL="${WHISPER_MODEL:-small}"
-          if [ "$MODEL" = "true" ] || [ -z "$MODEL" ]; then
-            MODEL="small"
+          mkdir -p transcripts
+          echo "[ INFO ] Mengunduh transkrip yang sudah ada untuk item: $ITEM_ID..."
+          curl -f -L -s -o transcripts/transcript.srt "https://archive.org/download/$ITEM_ID/transcript.srt"
+
+          if [ ! -s transcripts/transcript.srt ]; then
+            echo "[ ERROR ] Berkas transcript.srt kosong atau gagal diunduh dari Archive.org!"
+            exit 1
           fi
-          echo "=========================================================="
-          echo "[ INFO ] Item ID       : $ITEM_ID"
-          echo "[ INFO ] Audio URL     : $AUDIO_URL"
-          echo "[ INFO ] Whisper Model : $MODEL"
-          echo "=========================================================="
-          python3 -u main/transcribe.py "$AUDIO_URL" "$MODEL"
 
-      # ── 3. Buat Ringkasan Metadata JSON (summary.json) ─────────────────────
-      - name: Generate Summary JSON
-        if: always()
+          echo "[ OK ] transcript.srt berhasil diunduh ($(wc -l < transcripts/transcript.srt) baris)."
+          echo "[ INFO ] Membersihkan transkrip dengan main/clean.py..."
+          python3 main/clean.py transcripts/transcript.srt > clean.txt
+          echo "[ OK ] clean.txt selesai dibuat: $(wc -l < clean.txt) baris."
+          echo "Rentang awal transkrip : $(head -n 1 clean.txt | cut -c 1-90)..."
+          echo "Rentang akhir transkrip: $(tail -n 1 clean.txt | cut -c 1-90)..."
+
+      # ── 4. Jalankan llama-server di Background ──────────────────────────────
+      - name: Start Llama Server
         env:
-          ITEM_ID: ${{ matrix.item_id }}
-          TITLE: ${{ matrix.title }}
-          AUDIO_URL: ${{ matrix.audio_url }}
-          BROADCAST_DATE: ${{ matrix.date }}
-          WHISPER_MODEL: ${{ inputs.whisper_model || 'small' }}
-          JOB_STATUS: ${{ job.status }}
+          MODEL_FILENAME: ${{ inputs.model_filename }}
+          CTX_SIZE: ${{ inputs.context_size }}
         run: |
-          python3 - << 'EOF'
-          import json, os, datetime
-          
-          item_id = os.environ.get("ITEM_ID", "unknown")
-          title = os.environ.get("TITLE", "")
-          audio_url = os.environ.get("AUDIO_URL", "")
-          broadcast_date = os.environ.get("BROADCAST_DATE", "")
-          whisper_model = os.environ.get("WHISPER_MODEL", "small")
-          job_status = os.environ.get("JOB_STATUS", "unknown")
-          
-          transcripts_dir = "transcripts"
-          os.makedirs(transcripts_dir, exist_ok=True)
-          
-          file_stats = {}
-          line_stats = {}
-          if os.path.isdir(transcripts_dir):
-              for f in sorted(os.listdir(transcripts_dir)):
-                  p = os.path.join(transcripts_dir, f)
-                  if os.path.isfile(p):
-                      file_stats[f] = os.path.getsize(p)
-                      if f.endswith((".txt", ".srt")):
-                          try:
-                              with open(p, "r", encoding="utf-8", errors="ignore") as fh:
-                                  line_stats[f] = len(fh.readlines())
-                          except Exception:
-                              pass
-          
-          summary = {
-              "item_id": item_id,
-              "title": title,
-              "date": broadcast_date,
-              "audio_url": audio_url,
-              "whisper_model": whisper_model,
-              "status": job_status,
-              "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-              "files": file_stats,
-              "lines": line_stats
-          }
-          
-          summary_path = os.path.join(transcripts_dir, "summary.json")
-          with open(summary_path, "w", encoding="utf-8") as out:
-              json.dump(summary, out, indent=2, ensure_ascii=False)
-          print(f"[ OK ] Summary JSON berhasil dibuat di {summary_path}:")
-          print(json.dumps(summary, indent=2))
-          EOF
+          chmod +x bin/linux-x64/llama-server
+          MODEL_PATH="$HOME/qwen/$MODEL_FILENAME"
 
-      # ── 4. Log Ringkasan Hasil ke GitHub Step Summary ──────────────────────
+          echo "[ INFO ] Memulai llama-server pada port 8080..."
+          nohup ./bin/linux-x64/llama-server \
+            -m "$MODEL_PATH" \
+            -c "$CTX_SIZE" \
+            -b 512 \
+            -ub 256 \
+            -t $(nproc) \
+            --jinja \
+            --port 8080 > server.log 2>&1 &
+
+          echo "[ INFO ] Menunggu server siap merespons..."
+          READY=0
+          for i in $(seq 1 120); do
+            if curl -s http://127.0.0.1:8080/health | grep -qi "ok\|ready\|status"; then
+              echo "[ OK ] llama-server siap merespons!"
+              READY=1
+              break
+            fi
+            echo "Menunggu inisialisasi model ($i/120)..."
+            sleep 5
+          done
+
+          if [ $READY -eq 0 ]; then
+            echo "[ ERROR ] llama-server gagal siap dalam waktu 10 menit!"
+            echo "=== Isi server.log ==="
+            cat server.log
+            exit 1
+          fi
+
+      # ── 5. Jalankan ask.py untuk Inferensi DeepSeek R1 ───────────────────────
+      - name: Run Inference (ask.py)
+        run: |
+          echo "[ INFO ] Mengirim prompt sistem dan clean.txt ke llama-server..."
+          python3 -u main/ask.py main/prompt.txt clean.txt out.json http://127.0.0.1:8080/v1/chat/completions
+          echo "=== Hasil out.json ==="
+          cat out.json
+
+      # ── 6. Log Ringkasan Hasil ke GitHub Step Summary ──────────────────────
       - name: Log Step Summary
         if: always()
         env:
           ITEM_ID: ${{ matrix.item_id }}
           TITLE: ${{ matrix.title }}
-          AUDIO_URL: ${{ matrix.audio_url }}
           BROADCAST_DATE: ${{ matrix.date }}
-          WHISPER_MODEL: ${{ inputs.whisper_model || 'small' }}
+          MODEL_FILENAME: ${{ inputs.model_filename }}
         run: |
-          echo "### 🎙️ Hasil Transkripsi: $TITLE" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 🧠 Hasil Inferensi LLM: $TITLE" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Archive Item ID**: [\`$ITEM_ID\`](https://archive.org/details/$ITEM_ID)" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Tanggal Siaran**: \`$BROADCAST_DATE\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Tautan Audio Sumber**: [$AUDIO_URL]($AUDIO_URL)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Model Whisper**: \`$WHISPER_MODEL\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Status Transkripsi**: ${{ job.status == 'success' && '✅ Berhasil' || '❌ Gagal' }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Archive Upload**: 🚫 *Dinonaktifkan (Uji Coba Transkripsi Paralel - Tanpa Upload)*" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Model LLM**: \`$MODEL_FILENAME\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Status Eksekusi**: ${{ job.status == 'success' && '✅ Berhasil' || '❌ Gagal' }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Archive Upload**: 🚫 *Dinonaktifkan (Uji Coba Eksekusi Paralel - Tanpa Upload)*" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          
-          if [ -d "transcripts" ]; then
-            echo "#### 📦 Berkas Hasil Transkripsi (Folder \`transcripts/\`):" >> "$GITHUB_STEP_SUMMARY"
-            echo "| Berkas | Ukuran | Deskripsi |" >> "$GITHUB_STEP_SUMMARY"
-            echo "| :--- | :--- | :--- |" >> "$GITHUB_STEP_SUMMARY"
-            for f in transcripts/*; do
-              if [ -f "$f" ]; then
-                fname=$(basename "$f")
-                fsize=$(ls -lh "$f" | awk '{print $5}')
-                desc="Data output"
-                case "$fname" in
-                  transcript.srt) desc="Subtitel SRT dengan timestamp" ;;
-                  transcript.txt) desc="Teks transkrip polos lengkap" ;;
-                  transcript.json) desc="Output detail JSON dari Whisper.cpp" ;;
-                  summary.json) desc="Metadata ringkasan pengujian transkripsi" ;;
-                esac
-                echo "| \`$fname\` | $fsize | $desc |" >> "$GITHUB_STEP_SUMMARY"
-              fi
-            done
-            
-            if [ -s "transcripts/transcript.srt" ]; then
-              echo "" >> "$GITHUB_STEP_SUMMARY"
-              echo "<details><summary>📜 Cuplikan Subtitle SRT (15 Baris Pertama)</summary>" >> "$GITHUB_STEP_SUMMARY"
-              echo "" >> "$GITHUB_STEP_SUMMARY"
-              echo '```text' >> "$GITHUB_STEP_SUMMARY"
-              head -n 15 transcripts/transcript.srt >> "$GITHUB_STEP_SUMMARY"
-              echo '```' >> "$GITHUB_STEP_SUMMARY"
-              echo "</details>" >> "$GITHUB_STEP_SUMMARY"
-            fi
-            
-            if [ -s "transcripts/summary.json" ]; then
-              echo "" >> "$GITHUB_STEP_SUMMARY"
-              echo "<details><summary>📊 Rincian Metadata summary.json</summary>" >> "$GITHUB_STEP_SUMMARY"
-              echo "" >> "$GITHUB_STEP_SUMMARY"
-              echo '```json' >> "$GITHUB_STEP_SUMMARY"
-              cat transcripts/summary.json >> "$GITHUB_STEP_SUMMARY"
-              echo '```' >> "$GITHUB_STEP_SUMMARY"
-              echo "</details>" >> "$GITHUB_STEP_SUMMARY"
-            fi
+
+          if [ -s think.txt ]; then
+            echo "<details><summary>💭 Lihat Jalur Penalaran (&lt;think&gt; trace)</summary>" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            cat think.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "</details>" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # ── 5. Simpan Artifact Hasil Uji Coba (Tanpa Upload Archive.org) ─────────
-      - name: Upload Transcript Artifact
+          if [ -s out.json ]; then
+            echo "#### 📄 Output JSON Terformat:" >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat out.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ── 7. Simpan Artifact Hasil Uji Coba (Tanpa Upload Archive.org) ─────────
+      - name: Upload LLM Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: transcript-${{ matrix.item_id }}
-          path: transcripts/
-          if-no-files-found: warn
+          name: llm-${{ matrix.item_id }}
+          path: |
+            out.json
+            think.txt
+            clean.txt
+            server.log
+            transcripts/transcript.srt
           retention-days: 7
