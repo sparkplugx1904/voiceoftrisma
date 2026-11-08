@@ -43,21 +43,35 @@ def ensure_dependencies():
     print("🚀 [1/5] MEMERIKSA & MEMASANG DEPENDENSI KAGGLE GPU")
     print("=" * 70)
 
-    try:
-        import torch
-        import transformers
-        import accelerate
-        import bitsandbytes
-        import soundfile
-        import librosa
-        print("[ OK ] Semua dependensi utama sudah terpasang.")
-    except ImportError as e:
-        print(f"[ INFO ] Dependensi belum lengkap ({e}). Memulai instalasi pip...")
+    import importlib.util
+    needed = []
+    checks = {
+        "transformers": "git+https://github.com/huggingface/transformers.git",
+        "accelerate": "accelerate>=0.26.0",
+        "bitsandbytes": "bitsandbytes>=0.42.0",
+        "soundfile": "soundfile>=0.12.1",
+        "librosa": "librosa>=0.10.1",
+        "pydub": "pydub>=0.25.1",
+        "scipy": "scipy",
+    }
+    for mod, pkg in checks.items():
+        if importlib.util.find_spec(mod) is None:
+            needed.append(pkg)
+
+    if needed:
+        print(f"[ INFO ] Menginstal paket yang belum terpasang: {', '.join(needed)}...")
         import subprocess
-        for pkg in REQUIRED_PIP_PACKAGES:
+        for pkg in needed:
             print(f"  · Menginstal: {pkg}...")
             subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", pkg], check=False)
         print("[ OK ] Seluruh dependensi berhasil dipasang!\n")
+
+        # Bersihkan cache sys.modules agar tidak tercampur modul lama dan baru
+        for k in list(sys.modules.keys()):
+            if k == "transformers" or k.startswith("transformers."):
+                del sys.modules[k]
+    else:
+        print("[ OK ] Semua dependensi utama sudah terpasang.")
 
 
 # ── 2. DETEKSI LINGKUNGAN DUAL GPU T4 ────────────────────────────────────────
@@ -217,8 +231,13 @@ def split_audio_into_segments(audio_path: Path, max_min: int = 20) -> List[Tuple
 def load_nemotron_model(model_id: str = "nvidia/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B"):
     """Memuat model Nemotron 30B terkuantisasi 4-bit terdistribusi di Dual GPU T4."""
     import torch
+    try:
+        import transformers.utils
+        if not hasattr(transformers.utils, "is_torchcodec_usable"):
+            transformers.utils.is_torchcodec_usable = lambda: False
+    except Exception:
+        pass
     from transformers import AutoModelForMultimodalLM, AutoProcessor
-
     print(f"\n[ MODEL ] Menginisialisasi Nemotron 3.5 Transcribe ({model_id})...")
     print("  · Mengaktifkan kuantisasi 4-bit bitsandbytes...")
     print("  · Mendistribusikan layer secara otomatis ke GPU 0 dan GPU 1...")
@@ -254,8 +273,13 @@ def transcribe_nemotron(processor, model, chunk_file: Path, language: str = "id"
 def load_qwen_omni_model(model_id: str = "Qwen/Qwen3-Omni-30B-A3B-Instruct"):
     """Memuat model Qwen3-Omni 30B terkuantisasi 4-bit terdistribusi di Dual GPU T4."""
     import torch
+    try:
+        import transformers.utils
+        if not hasattr(transformers.utils, "is_torchcodec_usable"):
+            transformers.utils.is_torchcodec_usable = lambda: False
+    except Exception:
+        pass
     from transformers import AutoModelForMultimodalLM, AutoProcessor
-
     print(f"\n[ MODEL ] Menginisialisasi Qwen3-Omni ({model_id})...")
     print("  · Mengaktifkan kuantisasi 4-bit bitsandbytes...")
     print("  · Mendistribusikan layer secara otomatis ke GPU 0 dan GPU 1...")
