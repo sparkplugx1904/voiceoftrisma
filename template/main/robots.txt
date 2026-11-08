@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /login/
+Disallow: /dashboard/
+
+Sitemap: https://voiceoftrisma.github.io/sitemap.xml

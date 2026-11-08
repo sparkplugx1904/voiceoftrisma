@@ -47,12 +47,27 @@ jobs:
           git clone "https://x-access-token:${WEB_TOKEN_SECRET}@github.com/voiceoftrisma/voiceoftrisma.github.io.git" web-repo
           rsync -av --delete --exclude=.git/ web/ web-repo/
           cd web-repo
+          if [ -f sitemap.xml ]; then
+            sed -i "s|<lastmod>[^<]*</lastmod>|<lastmod>$(date -u +'%Y-%m-%d')</lastmod>|g" sitemap.xml
+          fi
           git config user.name "VoT Deploy Bot"
           git config user.email "deploy@voiceoftrisma.radio"
           git add -A
           git diff-index --quiet HEAD || git commit -m "Auto-deploy $(date -u +'%Y-%m-%d %H:%M UTC')"
           git push
           cd ..
+
+      - name: Prepare Cloudflare Pages Resources
+        run: |
+          set -e
+          echo "Sesuaikan domain sitemap dan robots untuk Cloudflare Pages..."
+          if [ -f web/sitemap.xml ]; then
+            sed -i 's|https://voiceoftrisma.github.io|https://voiceoftrisma.pages.dev|g' web/sitemap.xml
+            sed -i "s|<lastmod>[^<]*</lastmod>|<lastmod>$(date -u +'%Y-%m-%d')</lastmod>|g" web/sitemap.xml
+          fi
+          if [ -f web/robots.txt ]; then
+            sed -i 's|https://voiceoftrisma.github.io|https://voiceoftrisma.pages.dev|g' web/robots.txt
+          fi
 
       - name: Push to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3

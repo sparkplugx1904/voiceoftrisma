@@ -68,5 +68,6 @@ Situs web publik Voice of Trisma di-host di Cloudflare Pages sebagai alternatif 
 ### Alur Kerja Deployment Bersamaan (`.github/workflows/web-deploy.yml`):
 Setiap kali ada pembaruan kode di branch `main`:
 1. **Taking Resources**: File dari `template/main/` disiapkan ke direktori sementara `web/`.
-2. **Push to Github Pages**: Meng-clone dan men-deploy ke repositori `voiceoftrisma.github.io`.
-3. **Push to Cloudflare Pages**: Menjalankan action resmi `cloudflare/wrangler-action@v3` untuk mengunggah folder `web/` ke project `voiceoftrisma` menggunakan kredensial **`CF_TOKEN`** dan **`CLOUDFLARE_ACCOUNT_ID`**.
+2. **Push to Github Pages**: Meng-clone dan men-deploy ke repositori `voiceoftrisma.github.io` (dengan `sitemap.xml` & `robots.txt` berbasis domain GitHub Pages).
+3. **Prepare Cloudflare Pages Resources**: Menyesuaikan domain `sitemap.xml` dan `robots.txt` menjadi `voiceoftrisma.pages.dev` serta memperbarui tanggal `lastmod`.
+4. **Push to Cloudflare Pages**: Menjalankan action resmi `cloudflare/wrangler-action@v3` untuk mengunggah folder `web/` ke project `voiceoftrisma` menggunakan kredensial **`CF_TOKEN`** dan **`CLOUDFLARE_ACCOUNT_ID`**.
