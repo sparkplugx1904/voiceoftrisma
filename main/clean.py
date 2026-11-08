@@ -13,9 +13,16 @@ for h, m, s, t in pat.findall(raw):
     t = re.sub(r"\s+", " ", t).strip()
     t = re.sub(r"(.)\1{4,}", r"\1", t)                      # titik/huruf berulang
     t = re.sub(r"\b(\w+)(?:[,\s]+\1\b){3,}", r"\1", t)      # kata berulang
-    if not re.search(r"[A-Za-z0-9]", t) or t in last:       # kosong / duplikat
+    if not re.search(r"[A-Za-z0-9]", t):
         continue
-    last = (last + [t])[-3:]
+    t_norm = re.sub(r"[^a-zA-Z0-9]", "", t.lower())
+    if any(t_norm == re.sub(r"[^a-zA-Z0-9]", "", x.lower()) for x in last[-5:]):
+        continue
+    # Filter repetisi jingle/prompt Whisper di segmen hening/musik
+    if re.search(r"voice of trisma.*(?:madyapadma|profil siswa)", t, re.I):
+        if any(re.search(r"voice of trisma.*(?:madyapadma|profil siswa)", x, re.I) for x in last[-10:]):
+            continue
+    last = (last + [t])[-10:]
     groups.setdefault(sec // 60, []).append((sec, t))
 out = []
 for k in sorted(groups):

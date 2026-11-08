@@ -20,14 +20,18 @@ Template Skema Format (nama kunci harus persis):
 }
 Aturan JSON: seluruh field ('title', 'description', dan 'programs') WAJIB berada di dalam SATU objek {...} tunggal, DILARANG menutup kurung kurawal '}' sebelum array 'programs' selesai ditulis; wajib menggunakan enter/baris baru antar-properti dan antar-elemen array sesuai template; tanpa koma sisa (trailing comma); tanpa baris baru di dalam string nilai; kutipan di dalam teks pakai tanda petik tunggal '...'; semua nilai bertipe string.
 
-ATURAN 1: SUMBER FAKTA TUNGGAL
-Satu-satunya sumber fakta adalah transkrip. DILARANG menambah fakta dari pengetahuan luar (kota, tahun, genre, peringkat, tanggal rilis, makna lagu, profil artis, dll). Jika tidak diucapkan di transkrip, jangan ditulis. Lebih baik ringkas dan benar daripada panjang tapi mengarang.
+ATURAN 1: SUMBER FAKTA TUNGGAL & ANTI-HALUSINASI
+Satu-satunya sumber fakta adalah transkrip. DILARANG menambah fakta dari pengetahuan luar (kota, tahun, genre, peringkat, tanggal rilis, makna lagu, profil artis, dll).
+DILARANG KERAS MENGARANG MATERI/PROGRAM FIKTIF:
+- Jika suatu materi (seperti ramalan zodiak, bintang, horoskop, wawancara siswa berprestasi, tangga lagu, dll) TIDAK DIUCAPKAN ATAU DIBAHAS di transkrip, DILARANG KERAS MENULISNYA!
+- Jangan pernah mengarang isi 'topic' dan 'description' hanya demi mencocokkan nama program yang ada di daftar referensi!
+- Lebih baik ringkas dan benar daripada panjang tapi mengarang.
 
-ATURAN 2: DAFTAR PROGRAM (REFERENSI, BUKAN DAFTAR TERTUTUP)
-Daftar di bawah adalah program yang SAAT INI dikenal. Program baru bisa ditambahkan kapan saja di masa depan.
+ATURAN 2: DAFTAR PROGRAM & PRIORITAS FRASA JANGKAR
+Daftar di bawah adalah program resmi yang SAAT INI dikenal. Program baru bisa ditambahkan kapan saja.
 Program resmi saat ini:
 - Info Science (fenomena alam dari sudut pandang ilmiah)
-- Tau Gak Sih? (informasi unik dan peristiwa bersejarah)
+- Tau Gak Sih? (informasi unik, edukasi hari peringatan, sejarah, dan fakta menarik)
 - Nonstop Music Barat (lagu internasional + ulasan kisah & genre)
 - Nonstop Music Indo (lagu tanah air + ulasan tren musik nasional)
 - Ramalan Bintang (ramalan zodiak mingguan)
@@ -41,15 +45,34 @@ Program resmi saat ini:
 - Kilas Trisma (liputan event dan info sekolah)
 - Conveito (salam pendengar + lagu request)
 
-Contoh salah dengar Whisper (CONTOH, tidak lengkap; pakai kemiripan bunyi dan konteks untuk kasus lain):
-"Kongpot/Comfort Music" -> Nonstop Music; "Konfito/Konveito/Confeito" -> Conveito; "Alba/OBA Movie" -> All About Movie; "Kilos/Kelas Trisma" -> Kilas Trisma; "tanggal lagu ..." -> Tangga Lagu ...; "Profil Siswa Berpresstasi" -> Profil Siswa Berprestasi.
+PRIORITAS MUTLAK: FRASA JANGKAR PENYIAR (ATURAN TERTINGGI)
+Ketika penyiar secara eksplisit menyebutkan frasa pembuka program, seperti:
+  "di program acara <nama>"
+  "program acara <nama>"
+  "di program <nama>"
+  "balik lagi di program <nama>" / "kembali lagi di program <nama>"
+Maka nama program yang diucapkan penyiar ini adalah KEBENARAN MUTLAK yang WAJIB digunakan! DILARANG KERAS menggantinya dengan program lain!
+Contoh nyata:
+- Jika penyiar menyebut: "di program acara, tau gak sih" atau "program acara, tahu gak sih" (termasuk variasi Whisper seperti "tahun gasi" / "tau ga si"), maka nama program WAJIB "Tau Gak Sih?". DILARANG KERAS MENGGANTINYA MENJADI "Ramalan Bintang", "Profil Siswa Berprestasi", atau lainnya!
+- Jika penyiar membuka segmen dengan "di program acara, Alba Movie" -> nama program adalah "All About Movie".
 
-Cara memilih nama program:
-a. Jika bunyi nama yang diucapkan penyiar mirip KUAT dengan satu program di daftar DAN isi segmennya cocok dengan deskripsi program itu, tulis nama resminya.
-b. Nonstop Music: tentukan Indo atau Barat dari lagu yang diputar/disebut (artis dan bahasa lagu). Jika tidak bisa dipastikan, tulis "Nonstop Music" saja. Jangan menebak.
-c. Jika penyiar membuka segmen dengan nama program yang TIDAK mirip program mana pun di daftar (misal sapaan "Selamat datang di <nama>"), anggap itu program BARU: tulis namanya sesuai pendengaran terbaik dengan huruf kapital judul. JANGAN dipaksa menjadi program terdekat di daftar.
-d. Jika benar-benar tidak ada nama program yang terucap, beri nama deskriptif singkat dan netral (misal "Obrolan Pembuka"), bukan nama program resmi.
+Contoh salah dengar Whisper:
+- "tau gak sih" / "tahu gak sih" / "tahun gasi" / "tau ga si" / "tahu nggak sih" / "tahu gasi" -> Tau Gak Sih?
+- "Kongpot/Comfort Music" -> Nonstop Music
+- "Konfito/Konveito/Confeito" -> Conveito
+- "Alba/OBA Movie" -> All About Movie
+- "Kilos/Kelas Trisma" -> Kilas Trisma
+- "tanggal lagu ..." -> Tangga Lagu ...
+- "Profil Siswa Berpresstasi" -> Profil Siswa Berprestasi
 
+LARANGAN HALUSINASI SPESIFIK:
+a. LARANGAN HALUSINASI "RAMALAN BINTANG":
+   DILARANG KERAS menulis "Ramalan Bintang" kecuali penyiar benar-benar menyebut kata "Ramalan Bintang" atau secara eksplisit membacakan ramalan zodiak (Aries, Taurus, dll) di transkrip! Obrolan santai pembuka soal harapan awal bulan, semangat baru, atau cuaca BUKAN Ramalan Bintang! Jika penyiar membuka dengan "di program acara, tau gak sih", nama programnya adalah "Tau Gak Sih?", BUKAN "Ramalan Bintang"!
+b. LARANGAN HALUSINASI JINGLE "PROFIL SISWA BERPRESTASI":
+   DILARANG KERAS memasukkan "Profil Siswa Berprestasi" hanya karena ada jingle penutup atau repetisi otomatis Whisper seperti "Voice of Trisma, Madyapadma, Sobat Trisma, Profil Siswa Berprestasi" saat jeda lagu/doa! Masukkan "Profil Siswa Berprestasi" HANYA JIKA ada penyiar yang benar-benar mewawancarai siswa dan membahas prestasinya di transkrip!
+c. Nonstop Music: tentukan Indo atau Barat dari lagu yang diputar/disebut (artis dan bahasa lagu). Jika tidak bisa dipastikan, tulis "Nonstop Music" saja. Jangan menebak.
+d. Jika penyiar membuka segmen dengan nama program yang TIDAK mirip program mana pun di daftar (misal sapaan "Selamat datang di <nama>"), anggap itu program BARU: tulis namanya sesuai pendengaran terbaik dengan huruf kapital judul. JANGAN dipaksa menjadi program terdekat di daftar.
+e. Jika benar-benar tidak ada nama program yang terucap dan hanya obrolan selingan tanpa segmen resmi, beri nama deskriptif singkat dan netral (misal "Obrolan Pembuka"), bukan nama program resmi.
 ATURAN 3: NAMA PENYIAR (DINAMIS, TANPA DAFTAR TETAP)
 Tidak ada daftar penyiar. Penyiar berganti dari waktu ke waktu; temukan namanya dari transkrip.
 - PERINGATAN MUTLAK 'SOBAT TRISMA': 'Sobat Trisma' adalah PANGGILAN KEPADA PENDENGAR (AUDIENS / KAMU / KALIAN), SAMA SEKALI BUKAN NAMA PENYIAR! DILARANG KERAS menulis 'Sobat Trisma' di field 'announcer'! DILARANG KERAS menjadikan 'Sobat Trisma' sebagai subjek pelaku di dalam field 'description' (misal: DILARANG 'Sobat Trisma mengenalkan...', DILARANG 'Sobat Trisma memutar...'). Penyiar adalah orang yang berbicara KEPADA Sobat Trisma.
@@ -63,7 +86,7 @@ Tidak ada daftar penyiar. Penyiar berganti dari waktu ke waktu; temukan namanya 
 ATURAN 4: KOREKSI TYPO
 Perbaiki ejaan nama orang, judul lagu, artis, judul film, nama program, dan istilah sekolah memakai konteks dan kemiripan bunyi, TANPA mengubah fakta.
 - Prinsip Konsistensi Mayoritas: Jika suatu nama orang, nama lomba/ajang, atau singkatan diucapkan dengan beberapa variasi ejaan oleh Whisper (misalnya ada satu baris salah dengar menjadi kata umum bahasa Indonesia, namun di baris-baris lain diucapkan berulang kali dengan singkatan/ejaan berbeda), WAJIB gunakan variasi ejaan yang PALING SERING dan KONSISTEN muncul di transkrip. Jangan memilih kata umum bahasa Indonesia jika transkrip berulang kali membicarakan nama/singkatan khusus.
-- Istilah sekolah/komunitas: Voice of Trisma (VOT); sapaan "Sobat Trisma"; Madyapadma (unit pers/jurnalistik sekolah); SMA Negeri 3 Denpasar; TKA (Tes Kemampuan Akademik); Duta Trisma. Daftar istilah ini boleh bertambah; istilah lain yang muncul ditulis sesuai pendengaran terbaik.
+- Istilah sekolah: Voice of Trisma (VOT); sapaan "Sobat Trisma"; Madyapadma (unit pers/jurnalistik sekolah); SMA Negeri 3 Denpasar; TKA (Tes Kemampuan Akademik); Duta Trisma. Daftar istilah ini boleh bertambah; istilah lain yang muncul ditulis sesuai pendengaran terbaik.
 
 ATURAN 5: MUSIK, JINGLE, DAN NOISE
 - Abaikan lirik lagu. Untuk lagu, catat judul dan artis HANYA jika disebut penyiar.
@@ -99,9 +122,10 @@ ATURAN 9: "title" DAN "description" UTAMA
 - "description" utama: 2 sampai 3 kalimat sinopsis yang mengalir seperti pengantar episode: dari pembuka, sorotan terbaik (tamu, topik, lagu yang menonjol), sampai penutup. Sebut nama penyiar dan program yang benar-benar ada di siaran ini saja.
 
 PEMERIKSAAN SEBELUM MENJAWAB
-1. Nama program: sudah benar sesuai Aturan 2? Program baru tidak dipaksa menjadi program lama?
-2. Nama penyiar: DILARANG ADA 'Sobat Trisma'! Sudah dipastikan 'Sobat Trisma' TIDAK ditulis sebagai announcer atau subjek pelaku di description? Jika ada, GANTI dengan nama orang asli yang memandu acara!
-3. Adakah fakta, nama, judul, atau angka yang tidak ada di transkrip (termasuk yang menyerupai contoh di prompt ini)? Hapus.
-4. Adakah frasa terlarang di Aturan 8? Tulis ulang dengan nama dan detail konkret.
-5. Tiap program muncul sekali (DILARANG ada program dobel seperti dua 'Nonstop Music'; gabungkan atau bedakan Indo/Barat sesuai lagu yang diputar), urut waktu, timestamp berformat HH:MM:SS?
-6. Keluaran murni satu objek JSON valid, tanpa teks lain?
+1. Verifikasi Frasa Jangkar: Apakah penyiar menyebutkan "di program acara <nama>" (misal "tau gak sih")? Jika ya, apakah nama program di JSON sudah persis memakai nama tersebut (misal "Tau Gak Sih?")? DILARANG diganti atau ditukar program lain!
+2. Anti-Halusinasi Program & Zodiak: Apakah ada program yang materinya tidak ada di transkrip (misal "Ramalan Bintang" padahal tidak ada ramalan zodiak, atau "Profil Siswa Berprestasi" padahal tidak ada wawancara siswa)? Jika TIDAK ADA materi tersebut, SEGERA HAPUS atau GANTI dengan program yang benar-benar dibahas (misal "Tau Gak Sih?")!
+3. Nama penyiar: DILARANG ADA 'Sobat Trisma'! Sudah dipastikan 'Sobat Trisma' TIDAK ditulis sebagai announcer atau subjek pelaku di description? Jika ada, GANTI dengan nama orang asli yang memandu acara!
+4. Adakah fakta, nama, judul, atau angka yang tidak ada di transkrip (termasuk yang menyerupai contoh di prompt ini)? Hapus.
+5. Adakah frasa terlarang di Aturan 8? Tulis ulang dengan nama dan detail konkret.
+6. Tiap program muncul sekali (DILARANG ada program dobel seperti dua 'Nonstop Music'; gabungkan atau bedakan Indo/Barat sesuai lagu yang diputar), urut waktu, timestamp berformat HH:MM:SS?
+7. Keluaran murni satu objek JSON valid, tanpa teks lain?
