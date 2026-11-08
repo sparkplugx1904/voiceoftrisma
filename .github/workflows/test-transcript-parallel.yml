@@ -13,10 +13,6 @@ on:
           - medium
           - base
           - tiny
-      item_id:
-        description: "Filter ke 1 Item ID tertentu (kosongkan untuk menjalankan seluruh 5 siaran secara paralel)"
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -28,7 +24,6 @@ concurrency:
 jobs:
   transcribe_parallel:
     name: "🎙️ ${{ matrix.title }} (${{ matrix.item_id }})"
-    if: inputs.item_id == '' || inputs.item_id == matrix.item_id
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
