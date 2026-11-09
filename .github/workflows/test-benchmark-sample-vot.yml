@@ -1,0 +1,383 @@
+name: "[BENCHMARK] Whisper Small, Medium, Large vs Microsoft VibeVoice"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ═════════════════════════════════════════════════════════════════════════════
+  # 1. WHISPER SMALL (ggml-small.bin)
+  # ═════════════════════════════════════════════════════════════════════════════
+  whisper_small:
+    name: "🎙️ [Whisper] Small"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install System Dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: Prepare Audio WAV 16kHz
+        run: ffmpeg -y -i assets/sample_vot.mp3 -ar 16000 -ac 1 -c:a pcm_s16le sample.wav
+
+      - name: Run Whisper Small
+        run: |
+          mkdir -p outputs
+          chmod +x bin/linux-x64/whisper-cli
+          START_T=$(date +%s%N)
+          bin/linux-x64/whisper-cli -m models/ggml-small.bin -f sample.wav -l id -t 4 --no-timestamps > outputs/whisper_small.txt 2>&1
+          END_T=$(date +%s%N)
+          ELAPSED=$(echo "scale=2; ($END_T - $START_T) / 1000000000" | bc)
+          echo "$ELAPSED" > outputs/whisper_small_time.txt
+          echo "[ OK ] Whisper Small selesai dalam $ELAPSED detik"
+          cat outputs/whisper_small.txt
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-whisper-small
+          path: outputs/
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # 2. WHISPER MEDIUM (ggml-medium.bin)
+  # ═════════════════════════════════════════════════════════════════════════════
+  whisper_medium:
+    name: "🎙️ [Whisper] Medium"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install System Dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: Prepare Audio WAV 16kHz
+        run: ffmpeg -y -i assets/sample_vot.mp3 -ar 16000 -ac 1 -c:a pcm_s16le sample.wav
+
+      - name: Run Whisper Medium
+        run: |
+          mkdir -p outputs
+          chmod +x bin/linux-x64/whisper-cli
+          START_T=$(date +%s%N)
+          bin/linux-x64/whisper-cli -m models/ggml-medium.bin -f sample.wav -l id -t 4 --no-timestamps > outputs/whisper_medium.txt 2>&1
+          END_T=$(date +%s%N)
+          ELAPSED=$(echo "scale=2; ($END_T - $START_T) / 1000000000" | bc)
+          echo "$ELAPSED" > outputs/whisper_medium_time.txt
+          echo "[ OK ] Whisper Medium selesai dalam $ELAPSED detik"
+          cat outputs/whisper_medium.txt
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-whisper-medium
+          path: outputs/
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # 3. WHISPER LARGE (ggml-large-v3-turbo.bin)
+  # ═════════════════════════════════════════════════════════════════════════════
+  whisper_large:
+    name: "🎙️ [Whisper] Large (v3-Turbo)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg aria2
+
+      - name: Download Whisper Large v3-Turbo Model via aria2c
+        run: |
+          mkdir -p models_large
+          aria2c -x 16 -s 16 -k 1M -d models_large -o ggml-large-v3-turbo.bin \
+            https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
+
+      - name: Prepare Audio WAV 16kHz
+        run: ffmpeg -y -i assets/sample_vot.mp3 -ar 16000 -ac 1 -c:a pcm_s16le sample.wav
+
+      - name: Run Whisper Large v3-Turbo
+        run: |
+          mkdir -p outputs
+          chmod +x bin/linux-x64/whisper-cli
+          START_T=$(date +%s%N)
+          bin/linux-x64/whisper-cli -m models_large/ggml-large-v3-turbo.bin -f sample.wav -l id -t 4 --no-timestamps > outputs/whisper_large.txt 2>&1
+          END_T=$(date +%s%N)
+          ELAPSED=$(echo "scale=2; ($END_T - $START_T) / 1000000000" | bc)
+          echo "$ELAPSED" > outputs/whisper_large_time.txt
+          echo "[ OK ] Whisper Large selesai dalam $ELAPSED detik"
+          cat outputs/whisper_large.txt
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-whisper-large
+          path: outputs/
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # 4. MICROSOFT VIBEVOICE-ASR (7B)
+  # ═════════════════════════════════════════════════════════════════════════════
+  vibevoice:
+    name: "🎙️ [Speech-LLM] Microsoft VibeVoice-ASR"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install System Dependencies & Swap
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg aria2
+          echo "=== Swap 32GB ==="
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift 2>/dev/null || true
+          sudo fallocate -l 32G /swapfile_extra || sudo dd if=/dev/zero of=/swapfile_extra bs=1M count=32768
+          sudo chmod 600 /swapfile_extra
+          sudo mkswap /swapfile_extra
+          sudo swapon /swapfile_extra
+
+      - name: Install VibeVoice Package & Dependencies
+        run: |
+          git clone --depth 1 https://github.com/microsoft/VibeVoice.git
+          cd VibeVoice
+          pip install --no-cache-dir -e .
+          pip install --no-cache-dir soundfile librosa pydub accelerate torch torchaudio
+          cd ..
+
+      - name: Download VibeVoice Model Shards via aria2c (Fast 16 Threads)
+        run: |
+          mkdir -p models_vibevoice
+          python3 - << 'EOF'
+          import urllib.request, json, subprocess
+          repo_id = "microsoft/VibeVoice-ASR"
+          dest_dir = "models_vibevoice"
+          api_url = f"https://huggingface.co/api/models/{repo_id}"
+          req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+          with urllib.request.urlopen(req) as resp:
+              data = json.loads(resp.read().decode())
+          files = [s["rfilename"] for s in data.get("siblings", []) if not s["rfilename"].startswith(".")]
+          
+          with open("aria2_vibevoice.txt", "w") as f:
+              for fn in files:
+                  f.write(f"https://huggingface.co/{repo_id}/resolve/main/{fn}\n  dir={dest_dir}\n  out={fn}\n")
+                  
+          subprocess.run(["aria2c", "-i", "aria2_vibevoice.txt", "-j", "16", "-x", "16", "-s", "16", "-k", "1M", "--allow-overwrite=true", "--auto-file-renaming=false", "--summary-interval=5", "--console-log-level=warn"], check=True)
+          EOF
+
+      - name: Prepare Audio WAV 16kHz
+        run: ffmpeg -y -i assets/sample_vot.mp3 -ar 16000 -ac 1 -c:a pcm_s16le sample.wav
+
+      - name: Run VibeVoice Inference
+        run: |
+          mkdir -p outputs
+          python3 - << 'EOF'
+          import os, sys, time, torch, json
+          
+          print("=" * 65)
+          print("[ VIBEVOICE ] Memulai inferensi Microsoft VibeVoice-ASR pada sample_vot...")
+          print("=" * 65)
+          
+          try:
+              from vibevoice.modular.modeling_vibevoice_asr import VibeVoiceASRForConditionalGeneration
+              from vibevoice.processor.vibevoice_asr_processor import VibeVoiceASRProcessor
+              
+              model_dir = "models_vibevoice"
+              processor = VibeVoiceASRProcessor.from_pretrained(model_dir)
+              model = VibeVoiceASRForConditionalGeneration.from_pretrained(
+                  model_dir,
+                  device_map="cpu",
+                  torch_dtype=torch.bfloat16,
+                  attn_implementation="sdpa",
+              )
+              
+              audio_file = "sample.wav"
+              t0 = time.time()
+              
+              inputs = processor(
+                  audio=[audio_file],
+                  sampling_rate=None,
+                  return_tensors="pt",
+                  padding=True,
+                  add_generation_prompt=True
+              )
+              inputs = {k: v.to("cpu") if isinstance(v, torch.Tensor) else v for k, v in inputs.items()}
+              
+              with torch.no_grad():
+                  output_ids = model.generate(
+                      **inputs,
+                      max_new_tokens=512,
+                      repetition_penalty=1.15
+                  )
+              
+              transcripts = processor.batch_decode(output_ids, skip_special_tokens=True)
+              raw_text = transcripts[0].strip() if transcripts else ""
+              dur = time.time() - t0
+              
+              with open("outputs/vibevoice.txt", "w", encoding="utf-8") as out:
+                  out.write(raw_text)
+              with open("outputs/vibevoice_time.txt", "w", encoding="utf-8") as out:
+                  out.write(f"{dur:.2f}")
+                  
+              print(f"[ SUCCESS ] VibeVoice selesai dalam {dur:.1f} detik ({dur/60:.1f}m)")
+          except Exception as e:
+              print(f"[ ERROR ] VibeVoice inferensi gagal: {e}")
+              import traceback
+              traceback.print_exc()
+              with open("outputs/vibevoice.txt", "w", encoding="utf-8") as out:
+                  out.write(f"ERROR: {e}")
+              with open("outputs/vibevoice_time.txt", "w", encoding="utf-8") as out:
+                  out.write("0")
+          EOF
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-vibevoice
+          path: outputs/
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # 5. EVALUASI DAN PERBANDINGAN LENGKAP (WER, CER, WAKTU, AKURASI)
+  # ═════════════════════════════════════════════════════════════════════════════
+  compare_results:
+    name: "📊 Evaluasi & Perbandingan Akurasi (Adu Model)"
+    runs-on: ubuntu-latest
+    needs: [whisper_small, whisper_medium, whisper_large, vibevoice]
+    if: always()
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Download All Benchmark Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all_outputs/
+
+      - name: Run Evaluator Script
+        run: |
+          python3 - << 'EOF'
+          import os, re, json
+
+          def clean_text(t: str) -> str:
+              # Bersihkan baris log whisper atau metadata JSON
+              if "system" in t and "assistant" in t:
+                  # Ekstrak konten dari JSON VibeVoice
+                  match = re.search(r'\[\s*\{.*\}\s*\]', t, re.DOTALL)
+                  if match:
+                      try:
+                          items = json.loads(match.group(0))
+                          return " ".join([i.get("Content", "") for i in items])
+                      except Exception:
+                          pass
+              lines = []
+              for line in t.splitlines():
+                  line = line.strip()
+                  if not line: continue
+                  if line.startswith("whisper_") or line.startswith("system_info:") or line.startswith("main:"):
+                      continue
+                  lines.append(line)
+              return " ".join(lines)
+
+          def compute_wer(ref: str, hyp: str) -> float:
+              r = re.findall(r'\b\w+\b', ref.lower())
+              h = re.findall(r'\b\w+\b', hyp.lower())
+              if not r: return 0.0
+              d = [[0] * (len(h) + 1) for _ in range(len(r) + 1)]
+              for i in range(len(r) + 1): d[i][0] = i
+              for j in range(len(h) + 1): d[0][j] = j
+              for i in range(1, len(r) + 1):
+                  for j in range(1, len(h) + 1):
+                      if r[i-1] == h[j-1]:
+                          d[i][j] = d[i-1][j-1]
+                      else:
+                          d[i][j] = min(d[i-1][j] + 1, d[i][j-1] + 1, d[i-1][j-1] + 1)
+              return d[len(r)][len(h)] / len(r)
+
+          ref_path = "assets/sample_vot.txt"
+          ref_raw = ""
+          with open(ref_path, "r", encoding="utf-8") as f:
+              ref_raw = f.read()
+
+          # Hilangkan timestamp (0:00) dari ref
+          ref_clean = re.sub(r'\(\d+:\d+\)', '', ref_raw)
+
+          models = [
+              ("Whisper Small", "bench-whisper-small/whisper_small.txt", "bench-whisper-small/whisper_small_time.txt"),
+              ("Whisper Medium", "bench-whisper-medium/whisper_medium.txt", "bench-whisper-medium/whisper_medium_time.txt"),
+              ("Whisper Large (v3-Turbo)", "bench-whisper-large/whisper_large.txt", "bench-whisper-large/whisper_large_time.txt"),
+              ("Microsoft VibeVoice (7B)", "bench-vibevoice/vibevoice.txt", "bench-vibevoice/vibevoice_time.txt"),
+          ]
+
+          results = []
+          for name, out_file, time_file in models:
+              out_path = os.path.join("all_outputs", out_file)
+              time_path = os.path.join("all_outputs", time_file)
+              
+              text = ""
+              dur = "N/A"
+              if os.path.exists(out_path):
+                  with open(out_path, "r", encoding="utf-8", errors="ignore") as f:
+                      text = f.read()
+              if os.path.exists(time_path):
+                  with open(time_path, "r", encoding="utf-8", errors="ignore") as f:
+                      dur = f.read().strip() + "s"
+                      
+              c_hyp = clean_text(text)
+              err_rate = compute_wer(ref_clean, c_hyp)
+              accuracy = max(0.0, (1.0 - err_rate) * 100.0)
+              results.append({
+                  "name": name,
+                  "accuracy": accuracy,
+                  "wer": err_rate * 100.0,
+                  "time": dur,
+                  "text": c_hyp[:250] + "..." if len(c_hyp) > 250 else c_hyp
+              })
+
+          # Urutkan berdasarkan akurasi tertinggi
+          results.sort(key=lambda x: x["accuracy"], reverse=True)
+
+          md = []
+          md.append("## 🥊 Hasil Pertarungan Model: Whisper Small, Medium, Large vs Microsoft VibeVoice")
+          md.append(f"**Berkas Audio Uji**: `assets/sample_vot.mp3` (Durasi: ~64.4 detik)")
+          md.append(f"**Ground Truth**: `assets/sample_vot.txt`\n")
+          md.append("| Peringkat | Model | Akurasi Kata (1 - WER) | Word Error Rate (WER) | Waktu Eksekusi |")
+          md.append("| :--- | :--- | :--- | :--- | :--- |")
+          
+          for rank, r in enumerate(results, 1):
+              medal = "🥇" if rank == 1 else ("🥈" if rank == 2 else ("🥉" if rank == 3 else f"#{rank}"))
+              md.append(f"| {medal} | **{r['name']}** | **{r['accuracy']:.1f}%** | {r['wer']:.1f}% | {r['time']} |")
+
+          md.append("\n### 📝 Perbandingan Cuplikan Teks Transkripsi:\n")
+          for r in results:
+              md.append(f"#### 🎙️ {r['name']}")
+              md.append(f"> \"{r['text']}\"\n")
+
+          report = "\n".join(md)
+          print(report)
+
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "w", encoding="utf-8") as f:
+                  f.write(report)
+          EOF
