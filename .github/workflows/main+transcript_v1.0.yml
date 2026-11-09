@@ -143,7 +143,7 @@ jobs:
       - name: Download Qwen3.6-35B Model (Q8_0)
         run: |
           mkdir -p "$HOME/qwen"
-          MODEL_URL="https://huggingface.co/hesamation/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-GGUF/resolve/main/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled.Q8_0.gguf"
+          MODEL_URL="https://huggingface.co/Sparkplugx1904/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-GGUF/resolve/main/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled.Q8_0.gguf"
           MODEL_FILE="Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled.Q8_0.gguf"
           echo "[ INFO ] Mengunduh model Qwen 35B Q8_0 via aria2c..."
           aria2c -x 16 -s 16 -k 1M --file-allocation=none \

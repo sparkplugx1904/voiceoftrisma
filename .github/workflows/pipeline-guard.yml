@@ -237,7 +237,7 @@ jobs:
         run: |
           mkdir -p "$HOME/qwen"
           QUANT_VAL="${QUANT:-Q8_0}"
-          MODEL_URL="https://huggingface.co/hesamation/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-GGUF/resolve/main/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled.${QUANT_VAL}.gguf"
+          MODEL_URL="https://huggingface.co/Sparkplugx1904/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-GGUF/resolve/main/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled.${QUANT_VAL}.gguf"
           MODEL_FILE="Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled.${QUANT_VAL}.gguf"
           echo "[ INFO ] Mengunduh model Qwen 35B $QUANT_VAL via aria2c..."
           aria2c -x 16 -s 16 -k 1M --file-allocation=none \
