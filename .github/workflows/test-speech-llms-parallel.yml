@@ -1,0 +1,472 @@
+name: 🧪 Test Speech-LLMs Benchmark (VibeVoice, GigaChat, Ultravox)
+
+on:
+  workflow_dispatch:
+    inputs:
+      audio_broadcast:
+        description: "Pilihan siaran audio untuk diuji (Jumat / Sabtu)"
+        type: choice
+        required: true
+        default: "jumat"
+        options:
+          - "jumat"
+          - "sabtu"
+      sample_duration_min:
+        description: "Durasi pemotongan sampel audio dalam menit untuk benchmark CPU (default: 5 menit; isi 0 untuk audio penuh)"
+        required: false
+        default: "5"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-speech-llms-${{ inputs.audio_broadcast }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  # ═════════════════════════════════════════════════════════════════════════════
+  # INSTANCE 1: MICROSOFT VIBEVOICE-ASR (7B)
+  # ═════════════════════════════════════════════════════════════════════════════
+  test_vibevoice:
+    name: "🎙️ [Instance 1] Microsoft VibeVoice-ASR"
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg aria2
+
+      - name: Configure 32GB Swap
+        run: |
+          echo "=== Membersihkan Ruang Disk Runner ==="
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift 2>/dev/null || true
+          df -h /
+          echo "Mengalokasikan 32GB swapfile untuk VibeVoice..."
+          sudo fallocate -l 32G /swapfile_extra || sudo dd if=/dev/zero of=/swapfile_extra bs=1M count=32768
+          sudo chmod 600 /swapfile_extra
+          sudo mkswap /swapfile_extra
+          sudo swapon /swapfile_extra
+          free -h
+
+      - name: Install VibeVoice Package
+        run: |
+          echo "[ INFO ] Mengkloning dan memasang microsoft/VibeVoice..."
+          git clone --depth 1 https://github.com/microsoft/VibeVoice.git
+          cd VibeVoice
+          pip install --no-cache-dir -e .
+          pip install --no-cache-dir soundfile librosa pydub accelerate
+          cd ..
+
+      - name: Download Broadcast Audio via Worker Proxy
+        run: |
+          mkdir -p audio_downloads
+          python3 - << 'EOF'
+          import os, sys
+          from pathlib import Path
+          from main.core.downloader import download_archive_file
+          
+          target = "${{ inputs.audio_broadcast }}"
+          if target == "sabtu":
+              item_id = "vot-denpasar-20261107-183001"
+              name = "VOT-Denpasar_07-11-26-0.mp3"
+          else:
+              item_id = "vot-denpasar-20261106-183004"
+              name = "VOT-Denpasar_06-11-26-0.mp3"
+              
+          url = f"https://archive.org/download/{item_id}/{name}"
+          dest = Path("audio_downloads") / f"{item_id}_{name}"
+          if not download_archive_file(url, dest, min_size=5_000_000, is_text=False):
+              sys.exit(1)
+              
+          with open("audio_info.env", "w") as f:
+              f.write(f"RAW_AUDIO_PATH={dest.resolve()}\n")
+              f.write(f"AUDIO_ITEM_ID={item_id}\n")
+          EOF
+          cat audio_info.env >> $GITHUB_ENV
+
+      - name: Prepare Audio WAV & Slicing
+        run: |
+          MINUTES="${{ inputs.sample_duration_min || '5' }}"
+          echo "[ INFO ] Menyiapkan berkas WAV 16kHz mono (durasi: $MINUTES menit)..."
+          if [ "$MINUTES" -gt 0 ]; then
+            DURATION_SEC=$((MINUTES * 60))
+            ffmpeg -y -i "$RAW_AUDIO_PATH" -t "$DURATION_SEC" -ar 16000 -ac 1 -c:a pcm_s16le audio_sample.wav
+          else
+            ffmpeg -y -i "$RAW_AUDIO_PATH" -ar 16000 -ac 1 -c:a pcm_s16le audio_sample.wav
+          fi
+          echo "[ OK ] audio_sample.wav siap: $(ls -lh audio_sample.wav | awk '{print $5}')"
+
+      - name: Run VibeVoice Inference
+        run: |
+          mkdir -p outputs
+          python3 - << 'EOF'
+          import os, sys, time, torch
+          
+          print("=" * 65)
+          print("[ VIBEVOICE ] Memulai inferensi Microsoft VibeVoice-ASR...")
+          print("=" * 65)
+          
+          try:
+              from VibeVoice.vibevoice.modular.modeling_vibevoice_asr import VibeVoiceASRForConditionalGeneration
+              from VibeVoice.vibevoice.processor.vibevoice_asr_processor import VibeVoiceASRProcessor
+              
+              model_path = "microsoft/VibeVoice-ASR"
+              print(f"[ INFO ] Memuat processor dan model {model_path} pada CPU (SDPA attention)...")
+              
+              processor = VibeVoiceASRProcessor.from_pretrained(model_path, trust_remote_code=True)
+              model = VibeVoiceASRForConditionalGeneration.from_pretrained(
+                  model_path,
+                  device_map="cpu",
+                  torch_dtype=torch.float32,
+                  attn_implementation="sdpa",
+                  trust_remote_code=True
+              )
+              
+              print("[ INFO ] Memproses transkripsi audio...")
+              t0 = time.time()
+              
+              # Load audio
+              import soundfile as sf
+              audio_data, sr = sf.read("audio_sample.wav")
+              
+              inputs = processor(audio=audio_data, sampling_rate=sr, return_tensors="pt")
+              with torch.inference_mode():
+                  output_ids = model.generate(**inputs, max_new_tokens=4096)
+                  
+              transcript = processor.batch_decode(output_ids, skip_special_tokens=True)[0]
+              dur = time.time() - t0
+              
+              with open("outputs/vibevoice_transcript.txt", "w", encoding="utf-8") as out:
+                  out.write(transcript)
+                  
+              print(f"[ SUCCESS ] VibeVoice selesai dalam {dur:.1f} detik ({dur/60:.1f}m):")
+              print(f"\"{transcript[:200]}...\"")
+          except Exception as e:
+              print(f"[ ERROR ] VibeVoice inferensi gagal: {e}")
+              import traceback
+              traceback.print_exc()
+              with open("outputs/vibevoice_transcript.txt", "w", encoding="utf-8") as out:
+                  out.write(f"ERROR: {e}")
+          EOF
+
+      - name: Log Step Summary
+        if: always()
+        run: |
+          echo "### 🎙️ Hasil Transkripsi: Microsoft VibeVoice-ASR" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Model**: \`microsoft/VibeVoice-ASR\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Item ID**: \`$AUDIO_ITEM_ID\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -s outputs/vibevoice_transcript.txt ]; then
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            head -n 25 outputs/vibevoice_transcript.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-llm-vibevoice
+          path: outputs/
+          retention-days: 7
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # INSTANCE 2: GIGACHAT 3.1 AUDIO 10B (A1.8B MoE)
+  # ═════════════════════════════════════════════════════════════════════════════
+  test_gigachat:
+    name: "🎙️ [Instance 2] GigaChat Audio 10B (A1.8B)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg aria2
+
+      - name: Configure 32GB Swap
+        run: |
+          echo "=== Membersihkan Ruang Disk Runner ==="
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift 2>/dev/null || true
+          df -h /
+          echo "Mengalokasikan 32GB swapfile untuk GigaChat..."
+          sudo fallocate -l 32G /swapfile_extra || sudo dd if=/dev/zero of=/swapfile_extra bs=1M count=32768
+          sudo chmod 600 /swapfile_extra
+          sudo mkswap /swapfile_extra
+          sudo swapon /swapfile_extra
+          free -h
+
+      - name: Install Python Dependencies
+        run: |
+          pip install --no-cache-dir transformers accelerate soundfile librosa torch torchaudio
+
+      - name: Download Broadcast Audio via Worker Proxy
+        run: |
+          mkdir -p audio_downloads
+          python3 - << 'EOF'
+          import os, sys
+          from pathlib import Path
+          from main.core.downloader import download_archive_file
+          
+          target = "${{ inputs.audio_broadcast }}"
+          if target == "sabtu":
+              item_id = "vot-denpasar-20261107-183001"
+              name = "VOT-Denpasar_07-11-26-0.mp3"
+          else:
+              item_id = "vot-denpasar-20261106-183004"
+              name = "VOT-Denpasar_06-11-26-0.mp3"
+              
+          url = f"https://archive.org/download/{item_id}/{name}"
+          dest = Path("audio_downloads") / f"{item_id}_{name}"
+          if not download_archive_file(url, dest, min_size=5_000_000, is_text=False):
+              sys.exit(1)
+              
+          with open("audio_info.env", "w") as f:
+              f.write(f"RAW_AUDIO_PATH={dest.resolve()}\n")
+              f.write(f"AUDIO_ITEM_ID={item_id}\n")
+          EOF
+          cat audio_info.env >> $GITHUB_ENV
+
+      - name: Prepare Audio WAV & Slicing
+        run: |
+          MINUTES="${{ inputs.sample_duration_min || '5' }}"
+          echo "[ INFO ] Menyiapkan berkas WAV 16kHz mono (durasi: $MINUTES menit)..."
+          if [ "$MINUTES" -gt 0 ]; then
+            DURATION_SEC=$((MINUTES * 60))
+            ffmpeg -y -i "$RAW_AUDIO_PATH" -t "$DURATION_SEC" -ar 16000 -ac 1 -c:a pcm_s16le audio_sample.wav
+          else
+            ffmpeg -y -i "$RAW_AUDIO_PATH" -ar 16000 -ac 1 -c:a pcm_s16le audio_sample.wav
+          fi
+          echo "[ OK ] audio_sample.wav siap: $(ls -lh audio_sample.wav | awk '{print $5}')"
+
+      - name: Run GigaChat Inference
+        run: |
+          mkdir -p outputs
+          python3 - << 'EOF'
+          import os, sys, time, torch
+          
+          print("=" * 65)
+          print("[ GIGACHAT ] Memulai inferensi ai-sage/GigaChat3.1-Audio-10B-A1.8B...")
+          print("=" * 65)
+          
+          try:
+              from transformers import AutoModelForCausalLM, AutoProcessor
+              
+              model_name = "ai-sage/GigaChat3.1-Audio-10B-A1.8B"
+              print(f"[ INFO ] Memuat processor dan model {model_name}...")
+              
+              processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
+              model = AutoModelForCausalLM.from_pretrained(
+                  model_name,
+                  trust_remote_code=True,
+                  device_map="cpu",
+                  torch_dtype=torch.float32,
+                  low_cpu_mem_usage=True
+              )
+              
+              messages = [{"role": "user", "content": [
+                  {"type": "audio", "path": "audio_sample.wav"},
+                  {"type": "text", "text": "Transkripsikan audio ini secara lengkap."},
+              ]}]
+              
+              t0 = time.time()
+              inputs = processor.prepare_for_inference(messages, device=model.device)
+              with torch.inference_mode():
+                  output_ids = model.generate(**inputs, max_new_tokens=2048)
+              
+              answer_ids = output_ids[0, inputs["input_ids"].shape[1]:]
+              transcript = processor.decode(answer_ids, skip_special_tokens=True).strip()
+              dur = time.time() - t0
+              
+              with open("outputs/gigachat_transcript.txt", "w", encoding="utf-8") as out:
+                  out.write(transcript)
+                  
+              print(f"[ SUCCESS ] GigaChat selesai dalam {dur:.1f} detik ({dur/60:.1f}m):")
+              print(f"\"{transcript[:200]}...\"")
+          except Exception as e:
+              print(f"[ ERROR ] GigaChat inferensi gagal: {e}")
+              import traceback
+              traceback.print_exc()
+              with open("outputs/gigachat_transcript.txt", "w", encoding="utf-8") as out:
+                  out.write(f"ERROR: {e}")
+          EOF
+
+      - name: Log Step Summary
+        if: always()
+        run: |
+          echo "### 🎙️ Hasil Transkripsi: GigaChat 3.1 Audio 10B" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Model**: \`ai-sage/GigaChat3.1-Audio-10B-A1.8B\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Item ID**: \`$AUDIO_ITEM_ID\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -s outputs/gigachat_transcript.txt ]; then
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            head -n 25 outputs/gigachat_transcript.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-llm-gigachat
+          path: outputs/
+          retention-days: 7
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # INSTANCE 3: FIXIE.AI ULTRAVOX (v0.5)
+  # ═════════════════════════════════════════════════════════════════════════════
+  test_ultravox:
+    name: "🎙️ [Instance 3] Fixie.ai Ultravox"
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg aria2
+
+      - name: Configure 32GB Swap
+        run: |
+          echo "=== Membersihkan Ruang Disk Runner ==="
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift 2>/dev/null || true
+          df -h /
+          echo "Mengalokasikan 32GB swapfile untuk Ultravox..."
+          sudo fallocate -l 32G /swapfile_extra || sudo dd if=/dev/zero of=/swapfile_extra bs=1M count=32768
+          sudo chmod 600 /swapfile_extra
+          sudo mkswap /swapfile_extra
+          sudo swapon /swapfile_extra
+          free -h
+
+      - name: Install Python Dependencies
+        run: |
+          pip install --no-cache-dir transformers accelerate soundfile librosa pydub torch torchaudio
+
+      - name: Download Broadcast Audio via Worker Proxy
+        run: |
+          mkdir -p audio_downloads
+          python3 - << 'EOF'
+          import os, sys
+          from pathlib import Path
+          from main.core.downloader import download_archive_file
+          
+          target = "${{ inputs.audio_broadcast }}"
+          if target == "sabtu":
+              item_id = "vot-denpasar-20261107-183001"
+              name = "VOT-Denpasar_07-11-26-0.mp3"
+          else:
+              item_id = "vot-denpasar-20261106-183004"
+              name = "VOT-Denpasar_06-11-26-0.mp3"
+              
+          url = f"https://archive.org/download/{item_id}/{name}"
+          dest = Path("audio_downloads") / f"{item_id}_{name}"
+          if not download_archive_file(url, dest, min_size=5_000_000, is_text=False):
+              sys.exit(1)
+              
+          with open("audio_info.env", "w") as f:
+              f.write(f"RAW_AUDIO_PATH={dest.resolve()}\n")
+              f.write(f"AUDIO_ITEM_ID={item_id}\n")
+          EOF
+          cat audio_info.env >> $GITHUB_ENV
+
+      - name: Prepare Audio WAV & Slicing
+        run: |
+          MINUTES="${{ inputs.sample_duration_min || '5' }}"
+          echo "[ INFO ] Menyiapkan berkas WAV 16kHz mono (durasi: $MINUTES menit)..."
+          if [ "$MINUTES" -gt 0 ]; then
+            DURATION_SEC=$((MINUTES * 60))
+            ffmpeg -y -i "$RAW_AUDIO_PATH" -t "$DURATION_SEC" -ar 16000 -ac 1 -c:a pcm_s16le audio_sample.wav
+          else
+            ffmpeg -y -i "$RAW_AUDIO_PATH" -ar 16000 -ac 1 -c:a pcm_s16le audio_sample.wav
+          fi
+          echo "[ OK ] audio_sample.wav siap: $(ls -lh audio_sample.wav | awk '{print $5}')"
+
+      - name: Run Ultravox Inference
+        run: |
+          mkdir -p outputs
+          python3 - << 'EOF'
+          import os, sys, time, torch
+          
+          print("=" * 65)
+          print("[ ULTRAVOX ] Memulai inferensi Ultravox Speech-LLM...")
+          print("=" * 65)
+          
+          try:
+              import transformers
+              # Coba varian non-gated mistral-nemo atau v0_5
+              model_name = "fixie-ai/ultravox-v0_4_1-mistral-nemo"
+              print(f"[ INFO ] Memuat pipeline {model_name}...")
+              
+              pipe = transformers.pipeline(
+                  model=model_name,
+                  trust_remote_code=True,
+                  device="cpu",
+                  torch_dtype=torch.float32
+              )
+              
+              turns = [{
+                  "role": "user",
+                  "content": "Transkripsikan audio siaran radio ini secara akurat dan lengkap ke dalam bahasa Indonesia verbatim. Hanya berikan teks transkrip.",
+              }]
+              
+              t0 = time.time()
+              res = pipe({"audio": "audio_sample.wav", "turns": turns}, max_new_tokens=2048)
+              transcript = res[0]["text"] if isinstance(res, list) else str(res)
+              dur = time.time() - t0
+              
+              with open("outputs/ultravox_transcript.txt", "w", encoding="utf-8") as out:
+                  out.write(transcript)
+                  
+              print(f"[ SUCCESS ] Ultravox selesai dalam {dur:.1f} detik ({dur/60:.1f}m):")
+              print(f"\"{transcript[:200]}...\"")
+          except Exception as e:
+              print(f"[ ERROR ] Ultravox inferensi gagal: {e}")
+              import traceback
+              traceback.print_exc()
+              with open("outputs/ultravox_transcript.txt", "w", encoding="utf-8") as out:
+                  out.write(f"ERROR: {e}")
+          EOF
+
+      - name: Log Step Summary
+        if: always()
+        run: |
+          echo "### 🎙️ Hasil Transkripsi: Fixie.ai Ultravox" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Model**: \`fixie-ai/ultravox\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Item ID**: \`$AUDIO_ITEM_ID\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -s outputs/ultravox_transcript.txt ]; then
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            head -n 25 outputs/ultravox_transcript.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-llm-ultravox
+          path: outputs/
+          retention-days: 7
