@@ -12,9 +12,9 @@ on:
           - "jumat"
           - "sabtu"
       sample_duration_min:
-        description: "Durasi pemotongan sampel audio dalam menit untuk benchmark CPU (default: 5 menit; isi 0 untuk audio penuh)"
+        description: "Durasi sampel audio dalam menit untuk benchmark CPU (default: 1 menit)"
         required: false
-        default: "5"
+        default: "1"
 
 permissions:
   contents: read
@@ -43,7 +43,6 @@ jobs:
 
       - name: Install System Dependencies
         run: |
-          echo "[ INFO ] Menginstal FFmpeg dan aria2c..."
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg aria2
 
       - name: Configure 32GB Swap
@@ -60,7 +59,6 @@ jobs:
 
       - name: Install VibeVoice Package & Dependencies
         run: |
-          echo "[ INFO ] Mengkloning dan memasang microsoft/VibeVoice..."
           git clone --depth 1 https://github.com/microsoft/VibeVoice.git
           cd VibeVoice
           pip install --no-cache-dir -e .
@@ -119,7 +117,7 @@ jobs:
 
       - name: Prepare Audio WAV & Slicing
         run: |
-          MINUTES="${{ inputs.sample_duration_min || '5' }}"
+          MINUTES="${{ inputs.sample_duration_min || '1' }}"
           echo "[ INFO ] Menyiapkan berkas WAV 16kHz mono (durasi: $MINUTES menit)..."
           if [ "$MINUTES" -gt 0 ]; then
             DURATION_SEC=$((MINUTES * 60))
@@ -140,30 +138,29 @@ jobs:
           print("=" * 65)
           
           try:
-              from VibeVoice.vibevoice.modular.modeling_vibevoice_asr import VibeVoiceASRForConditionalGeneration
-              from VibeVoice.vibevoice.processor.vibevoice_asr_processor import VibeVoiceASRProcessor
+              from vibevoice.modular_vibevoice_asr import VibeVoiceASRProcessor, VibeVoiceASRForConditionalGeneration
               
-              model_path = "models_vibevoice"
-              print(f"[ INFO ] Memuat model lokal dari {model_path} pada CPU (SDPA attention)...")
+              model_dir = "models_vibevoice"
+              print(f"[ INFO ] Memuat processor dan model lokal dari {model_dir}...")
               
-              processor = VibeVoiceASRProcessor.from_pretrained(model_path)
+              processor = VibeVoiceASRProcessor.from_pretrained(model_dir)
               model = VibeVoiceASRForConditionalGeneration.from_pretrained(
-                  model_path,
+                  model_dir,
                   device_map="cpu",
                   torch_dtype=torch.float32,
-                  attn_implementation="sdpa"
+                  low_cpu_mem_usage=True
               )
               
-              print("[ INFO ] Memproses transkripsi audio...")
+              audio_file = "audio_sample.wav"
               t0 = time.time()
               
-              import soundfile as sf
-              audio_data, sr = sf.read("audio_sample.wav")
+              import librosa
+              wav, sr = librosa.load(audio_file, sr=16000)
               
-              inputs = processor(audio=audio_data, sampling_rate=sr, return_tensors="pt")
-              with torch.inference_mode():
-                  output_ids = model.generate(**inputs, max_new_tokens=4096)
-                  
+              inputs = processor(wav, sampling_rate=16000, return_tensors="pt")
+              with torch.no_grad():
+                  output_ids = model.generate(**inputs, max_new_tokens=1024)
+              
               transcript = processor.batch_decode(output_ids, skip_special_tokens=True)[0]
               dur = time.time() - t0
               
@@ -202,7 +199,7 @@ jobs:
           retention-days: 7
 
   # ═════════════════════════════════════════════════════════════════════════════
-  # INSTANCE 2: GIGACHAT 3.1 AUDIO 10B (A1.8B MoE)
+  # INSTANCE 2: GIGACHAT AUDIO 10B (A1.8B ACTIVE)
   # ═════════════════════════════════════════════════════════════════════════════
   test_gigachat:
     name: "🎙️ [Instance 2] GigaChat Audio 10B (A1.8B)"
@@ -254,7 +251,7 @@ jobs:
         run: |
           mkdir -p models_gigachat
           python3 - << 'EOF'
-          import urllib.request, json, subprocess, os
+          import urllib.request, json, subprocess, os, pathlib
           repo_id = "ai-sage/GigaChat3.1-Audio-10B-A1.8B"
           dest_dir = "models_gigachat"
           api_url = f"https://huggingface.co/api/models/{repo_id}"
@@ -270,6 +267,24 @@ jobs:
                   
           print(f"[ INFO ] Mengunduh {len(files)} berkas GigaChat via aria2c 16 thread...")
           subprocess.run(["aria2c", "-i", "aria2_gigachat.txt", "-j", "16", "-x", "16", "-s", "16", "-k", "1M", "--allow-overwrite=true", "--auto-file-renaming=false", "--summary-interval=5", "--console-log-level=warn"], check=True)
+          
+          # Patch routed_scaling_factor to float (1.0) in both config.json and decoder/config.json
+          for p_str in ["models_gigachat/config.json", "models_gigachat/decoder/config.json"]:
+              p = pathlib.Path(p_str)
+              if p.exists():
+                  with open(p, "r", encoding="utf-8") as f:
+                      cfg = json.load(f)
+                  modified = False
+                  if "routed_scaling_factor" in cfg and isinstance(cfg["routed_scaling_factor"], int):
+                      cfg["routed_scaling_factor"] = float(cfg["routed_scaling_factor"])
+                      modified = True
+                  if "text_config" in cfg and "routed_scaling_factor" in cfg["text_config"] and isinstance(cfg["text_config"]["routed_scaling_factor"], int):
+                      cfg["text_config"]["routed_scaling_factor"] = float(cfg["text_config"]["routed_scaling_factor"])
+                      modified = True
+                  if modified:
+                      with open(p, "w", encoding="utf-8") as f:
+                          json.dump(cfg, f, indent=2)
+                      print(f"[ OK ] Patched routed_scaling_factor to float in {p}")
           EOF
           ls -lh models_gigachat/
 
@@ -302,7 +317,7 @@ jobs:
 
       - name: Prepare Audio WAV & Slicing
         run: |
-          MINUTES="${{ inputs.sample_duration_min || '5' }}"
+          MINUTES="${{ inputs.sample_duration_min || '1' }}"
           echo "[ INFO ] Menyiapkan berkas WAV 16kHz mono (durasi: $MINUTES menit)..."
           if [ "$MINUTES" -gt 0 ]; then
             DURATION_SEC=$((MINUTES * 60))
@@ -339,16 +354,16 @@ jobs:
               
               messages = [{"role": "user", "content": [
                   {"type": "audio", "path": "audio_sample.wav"},
-                  {"type": "text", "text": "Transkripsikan rekaman audio ini secara lengkap."},
+                  {"type": "text", "text": "Transkripsikan rekaman audio siaran radio ini secara lengkap ke dalam bahasa Indonesia verbatim."},
               ]}]
               
               t0 = time.time()
               inputs = processor.prepare_for_inference(messages, device=model.device)
               with torch.inference_mode():
-                  output_ids = model.generate(**inputs, max_new_tokens=2048)
+                  output_ids = model.generate(**inputs, max_new_tokens=1024)
               
               answer_ids = output_ids[0, inputs["input_ids"].shape[1]:]
-              transcript = processor.decode(answer_ids, skip_special_tokens=True).strip()
+              transcript = processor.tokenizer.decode(answer_ids, skip_special_tokens=True).strip()
               dur = time.time() - t0
               
               with open("outputs/gigachat_transcript.txt", "w", encoding="utf-8") as out:
@@ -474,7 +489,7 @@ jobs:
 
       - name: Prepare Audio WAV & Slicing
         run: |
-          MINUTES="${{ inputs.sample_duration_min || '5' }}"
+          MINUTES="${{ inputs.sample_duration_min || '1' }}"
           echo "[ INFO ] Menyiapkan berkas WAV 16kHz mono (durasi: $MINUTES menit)..."
           if [ "$MINUTES" -gt 0 ]; then
             DURATION_SEC=$((MINUTES * 60))
@@ -496,6 +511,13 @@ jobs:
           
           try:
               import transformers
+              import transformers.modeling_utils
+              
+              # Monkeypatch _init_weights attribute for transformers >= 4.45 compatibility
+              if not hasattr(transformers.modeling_utils, "_init_weights"):
+                  transformers.modeling_utils._init_weights = True
+                  print("[ OK ] Monkeypatched transformers.modeling_utils._init_weights = True")
+                  
               model_dir = "models_ultravox"
               print(f"[ INFO ] Memuat pipeline Ultravox dari {model_dir}...")
               
@@ -512,7 +534,7 @@ jobs:
               }]
               
               t0 = time.time()
-              res = pipe({"audio": "audio_sample.wav", "turns": turns}, max_new_tokens=2048)
+              res = pipe({"audio": "audio_sample.wav", "turns": turns}, max_new_tokens=1024)
               transcript = res[0]["text"] if isinstance(res, list) else str(res)
               dur = time.time() - t0
               
