@@ -1,4 +1,4 @@
-name: "[BENCHMARK] Whisper Small, Medium, Large vs Microsoft VibeVoice"
+name: "[BENCHMARK] Whisper Small, Medium, Large vs VibeVoice vs Qwen3-ASR"
 
 on:
   workflow_dispatch:
@@ -187,7 +187,7 @@ jobs:
         run: |
           mkdir -p outputs
           python3 - << 'EOF'
-          import os, sys, time, torch, json
+          import os, sys, time, torch
           
           print("=" * 65)
           print("[ VIBEVOICE ] Memulai inferensi Microsoft VibeVoice-ASR pada sample_vot...")
@@ -252,12 +252,124 @@ jobs:
           path: outputs/
 
   # ═════════════════════════════════════════════════════════════════════════════
-  # 5. EVALUASI DAN PERBANDINGAN LENGKAP (WER, CER, WAKTU, AKURASI)
+  # 5. QWEN3-ASR 1.7B (Qwen/Qwen3-ASR-1.7B-hf)
+  # ═════════════════════════════════════════════════════════════════════════════
+  qwen3_asr:
+    name: "🎙️ [Speech-LLM] Qwen3-ASR-1.7B"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install System Dependencies & Swap
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg aria2
+          echo "=== Swap 16GB ==="
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift 2>/dev/null || true
+          sudo fallocate -l 16G /swapfile_extra || sudo dd if=/dev/zero of=/swapfile_extra bs=1M count=16384
+          sudo chmod 600 /swapfile_extra
+          sudo mkswap /swapfile_extra
+          sudo swapon /swapfile_extra
+
+      - name: Install Dependencies with Transformers Dev
+        run: |
+          pip install --no-cache-dir git+https://github.com/huggingface/transformers.git
+          pip install --no-cache-dir torch torchaudio soundfile librosa accelerate
+
+      - name: Download Qwen3-ASR-1.7B Shards via aria2c
+        run: |
+          mkdir -p models_qwen3
+          python3 - << 'EOF'
+          import urllib.request, json, subprocess
+          repo_id = "Qwen/Qwen3-ASR-1.7B-hf"
+          dest_dir = "models_qwen3"
+          api_url = f"https://huggingface.co/api/models/{repo_id}"
+          req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+          with urllib.request.urlopen(req) as resp:
+              data = json.loads(resp.read().decode())
+          files = [s["rfilename"] for s in data.get("siblings", []) if not s["rfilename"].startswith(".")]
+          
+          with open("aria2_qwen3.txt", "w") as f:
+              for fn in files:
+                  f.write(f"https://huggingface.co/{repo_id}/resolve/main/{fn}\n  dir={dest_dir}\n  out={fn}\n")
+                  
+          subprocess.run(["aria2c", "-i", "aria2_qwen3.txt", "-j", "16", "-x", "16", "-s", "16", "-k", "1M", "--allow-overwrite=true", "--auto-file-renaming=false", "--summary-interval=5", "--console-log-level=warn"], check=True)
+          EOF
+          ls -lh models_qwen3/
+
+      - name: Prepare Audio WAV 16kHz
+        run: ffmpeg -y -i assets/sample_vot.mp3 -ar 16000 -ac 1 -c:a pcm_s16le sample.wav
+
+      - name: Run Qwen3-ASR Inference
+        run: |
+          mkdir -p outputs
+          python3 - << 'EOF'
+          import os, sys, time, torch
+          
+          print("=" * 65)
+          print("[ QWEN3-ASR ] Memulai inferensi Qwen/Qwen3-ASR-1.7B-hf...")
+          print("=" * 65)
+          
+          try:
+              from transformers import AutoProcessor, AutoModelForMultimodalLM
+              
+              model_dir = "models_qwen3"
+              t0 = time.time()
+              
+              processor = AutoProcessor.from_pretrained(model_dir)
+              model = AutoModelForMultimodalLM.from_pretrained(
+                  model_dir,
+                  device_map="cpu",
+                  dtype=torch.bfloat16
+              )
+              
+              inputs = processor.apply_transcription_request(
+                  audio="sample.wav",
+                  language="id"
+              ).to(model.device, model.dtype)
+              
+              output_ids = model.generate(**inputs, max_new_tokens=512)
+              generated_ids = output_ids[:, inputs["input_ids"].shape[1]:]
+              transcription = processor.decode(generated_ids, return_format="transcription_only")[0].strip()
+              dur = time.time() - t0
+              
+              with open("outputs/qwen3_asr.txt", "w", encoding="utf-8") as out:
+                  out.write(transcription)
+              with open("outputs/qwen3_asr_time.txt", "w", encoding="utf-8") as out:
+                  out.write(f"{dur:.2f}")
+                  
+              print(f"[ SUCCESS ] Qwen3-ASR selesai dalam {dur:.1f} detik ({dur/60:.1f}m):")
+              print(f"\"{transcription}\"")
+          except Exception as e:
+              print(f"[ ERROR ] Qwen3-ASR inferensi gagal: {e}")
+              import traceback
+              traceback.print_exc()
+              with open("outputs/qwen3_asr.txt", "w", encoding="utf-8") as out:
+                  out.write(f"ERROR: {e}")
+              with open("outputs/qwen3_asr_time.txt", "w", encoding="utf-8") as out:
+                  out.write("0")
+          EOF
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-qwen3-asr
+          path: outputs/
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # 6. EVALUASI DAN PERBANDINGAN LENGKAP (WER, CER, WAKTU, AKURASI)
   # ═════════════════════════════════════════════════════════════════════════════
   compare_results:
     name: "📊 Evaluasi & Perbandingan Akurasi (Adu Model)"
     runs-on: ubuntu-latest
-    needs: [whisper_small, whisper_medium, whisper_large, vibevoice]
+    needs: [whisper_small, whisper_medium, whisper_large, vibevoice, qwen3_asr]
     if: always()
 
     steps:
@@ -280,9 +392,7 @@ jobs:
           import os, re, json
 
           def clean_text(t: str) -> str:
-              # Bersihkan baris log whisper atau metadata JSON
               if "system" in t and "assistant" in t:
-                  # Ekstrak konten dari JSON VibeVoice
                   match = re.search(r'\[\s*\{.*\}\s*\]', t, re.DOTALL)
                   if match:
                       try:
@@ -319,7 +429,6 @@ jobs:
           with open(ref_path, "r", encoding="utf-8") as f:
               ref_raw = f.read()
 
-          # Hilangkan timestamp (0:00) dari ref
           ref_clean = re.sub(r'\(\d+:\d+\)', '', ref_raw)
 
           models = [
@@ -327,6 +436,7 @@ jobs:
               ("Whisper Medium", "bench-whisper-medium/whisper_medium.txt", "bench-whisper-medium/whisper_medium_time.txt"),
               ("Whisper Large (v3-Turbo)", "bench-whisper-large/whisper_large.txt", "bench-whisper-large/whisper_large_time.txt"),
               ("Microsoft VibeVoice (7B)", "bench-vibevoice/vibevoice.txt", "bench-vibevoice/vibevoice_time.txt"),
+              ("Qwen3-ASR (1.7B)", "bench-qwen3-asr/qwen3_asr.txt", "bench-qwen3-asr/qwen3_asr_time.txt"),
           ]
 
           results = []
@@ -354,11 +464,10 @@ jobs:
                   "text": c_hyp[:250] + "..." if len(c_hyp) > 250 else c_hyp
               })
 
-          # Urutkan berdasarkan akurasi tertinggi
           results.sort(key=lambda x: x["accuracy"], reverse=True)
 
           md = []
-          md.append("## 🥊 Hasil Pertarungan Model: Whisper Small, Medium, Large vs Microsoft VibeVoice")
+          md.append("## 🥊 Hasil Pertarungan Model: Whisper vs Microsoft VibeVoice vs Qwen3-ASR")
           md.append(f"**Berkas Audio Uji**: `assets/sample_vot.mp3` (Durasi: ~64.4 detik)")
           md.append(f"**Ground Truth**: `assets/sample_vot.txt`\n")
           md.append("| Peringkat | Model | Akurasi Kata (1 - WER) | Word Error Rate (WER) | Waktu Eksekusi |")
