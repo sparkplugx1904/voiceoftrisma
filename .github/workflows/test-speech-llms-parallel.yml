@@ -43,6 +43,7 @@ jobs:
 
       - name: Install System Dependencies
         run: |
+          echo "[ INFO ] Menginstal FFmpeg dan aria2c..."
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg aria2
 
       - name: Configure 32GB Swap
@@ -57,14 +58,37 @@ jobs:
           sudo swapon /swapfile_extra
           free -h
 
-      - name: Install VibeVoice Package
+      - name: Install VibeVoice Package & Dependencies
         run: |
           echo "[ INFO ] Mengkloning dan memasang microsoft/VibeVoice..."
           git clone --depth 1 https://github.com/microsoft/VibeVoice.git
           cd VibeVoice
           pip install --no-cache-dir -e .
-          pip install --no-cache-dir soundfile librosa pydub accelerate
+          pip install --no-cache-dir soundfile librosa pydub accelerate torch torchaudio
           cd ..
+
+      - name: Download VibeVoice Model Shards via aria2c (Fast 16 Threads)
+        run: |
+          mkdir -p models_vibevoice
+          python3 - << 'EOF'
+          import urllib.request, json, subprocess, os
+          repo_id = "microsoft/VibeVoice-ASR"
+          dest_dir = "models_vibevoice"
+          api_url = f"https://huggingface.co/api/models/{repo_id}"
+          req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+          with urllib.request.urlopen(req) as resp:
+              data = json.loads(resp.read().decode())
+          files = [s["rfilename"] for s in data.get("siblings", []) if not s["rfilename"].startswith(".")]
+          
+          with open("aria2_vibevoice.txt", "w") as f:
+              for fn in files:
+                  url = f"https://huggingface.co/{repo_id}/resolve/main/{fn}"
+                  f.write(f"{url}\n  dir={dest_dir}\n  out={fn}\n")
+                  
+          print(f"[ INFO ] Mengunduh {len(files)} berkas VibeVoice via aria2c 16 thread...")
+          subprocess.run(["aria2c", "-i", "aria2_vibevoice.txt", "-j", "16", "-x", "16", "-s", "16", "-k", "1M", "--allow-overwrite=true", "--auto-file-renaming=false", "--summary-interval=5", "--console-log-level=warn"], check=True)
+          EOF
+          ls -lh models_vibevoice/
 
       - name: Download Broadcast Audio via Worker Proxy
         run: |
@@ -119,22 +143,20 @@ jobs:
               from VibeVoice.vibevoice.modular.modeling_vibevoice_asr import VibeVoiceASRForConditionalGeneration
               from VibeVoice.vibevoice.processor.vibevoice_asr_processor import VibeVoiceASRProcessor
               
-              model_path = "microsoft/VibeVoice-ASR"
-              print(f"[ INFO ] Memuat processor dan model {model_path} pada CPU (SDPA attention)...")
+              model_path = "models_vibevoice"
+              print(f"[ INFO ] Memuat model lokal dari {model_path} pada CPU (SDPA attention)...")
               
-              processor = VibeVoiceASRProcessor.from_pretrained(model_path, trust_remote_code=True)
+              processor = VibeVoiceASRProcessor.from_pretrained(model_path)
               model = VibeVoiceASRForConditionalGeneration.from_pretrained(
                   model_path,
                   device_map="cpu",
                   torch_dtype=torch.float32,
-                  attn_implementation="sdpa",
-                  trust_remote_code=True
+                  attn_implementation="sdpa"
               )
               
               print("[ INFO ] Memproses transkripsi audio...")
               t0 = time.time()
               
-              # Load audio
               import soundfile as sf
               audio_data, sr = sf.read("audio_sample.wav")
               
@@ -149,7 +171,7 @@ jobs:
                   out.write(transcript)
                   
               print(f"[ SUCCESS ] VibeVoice selesai dalam {dur:.1f} detik ({dur/60:.1f}m):")
-              print(f"\"{transcript[:200]}...\"")
+              print(f"\"{transcript[:300]}...\"")
           except Exception as e:
               print(f"[ ERROR ] VibeVoice inferensi gagal: {e}")
               import traceback
@@ -162,7 +184,7 @@ jobs:
         if: always()
         run: |
           echo "### 🎙️ Hasil Transkripsi: Microsoft VibeVoice-ASR" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Model**: \`microsoft/VibeVoice-ASR\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Model**: \`microsoft/VibeVoice-ASR (Local Shards)\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Item ID**: \`$AUDIO_ITEM_ID\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ -s outputs/vibevoice_transcript.txt ]; then
@@ -212,9 +234,44 @@ jobs:
           sudo swapon /swapfile_extra
           free -h
 
-      - name: Install Python Dependencies
+      - name: Install Python Dependencies & Create Mock vLLM
         run: |
           pip install --no-cache-dir transformers accelerate soundfile librosa torch torchaudio
+          
+          # Buat paket dummy vLLM agar import_utils transformers tidak menolak remote code GigaChat
+          python3 - << 'EOF'
+          import sys, site, pathlib
+          sp_dirs = site.getsitepackages()
+          target_sp = pathlib.Path(sp_dirs[0]) if sp_dirs else pathlib.Path(".")
+          vllm_stub = target_sp / "vllm"
+          vllm_stub.mkdir(parents=True, exist_ok=True)
+          (vllm_stub / "__init__.py").write_text("# Stub vllm\nclass VllmConfig:\n    pass\n")
+          (vllm_stub / "config.py").write_text("class VllmConfig:\n    pass\n")
+          print(f"[ OK ] Mock vLLM dibuat di {vllm_stub}")
+          EOF
+
+      - name: Download GigaChat Model Shards via aria2c (Fast 16 Threads)
+        run: |
+          mkdir -p models_gigachat
+          python3 - << 'EOF'
+          import urllib.request, json, subprocess, os
+          repo_id = "ai-sage/GigaChat3.1-Audio-10B-A1.8B"
+          dest_dir = "models_gigachat"
+          api_url = f"https://huggingface.co/api/models/{repo_id}"
+          req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+          with urllib.request.urlopen(req) as resp:
+              data = json.loads(resp.read().decode())
+          files = [s["rfilename"] for s in data.get("siblings", []) if not s["rfilename"].startswith(".")]
+          
+          with open("aria2_gigachat.txt", "w") as f:
+              for fn in files:
+                  url = f"https://huggingface.co/{repo_id}/resolve/main/{fn}"
+                  f.write(f"{url}\n  dir={dest_dir}\n  out={fn}\n")
+                  
+          print(f"[ INFO ] Mengunduh {len(files)} berkas GigaChat via aria2c 16 thread...")
+          subprocess.run(["aria2c", "-i", "aria2_gigachat.txt", "-j", "16", "-x", "16", "-s", "16", "-k", "1M", "--allow-overwrite=true", "--auto-file-renaming=false", "--summary-interval=5", "--console-log-level=warn"], check=True)
+          EOF
+          ls -lh models_gigachat/
 
       - name: Download Broadcast Audio via Worker Proxy
         run: |
@@ -268,12 +325,12 @@ jobs:
           try:
               from transformers import AutoModelForCausalLM, AutoProcessor
               
-              model_name = "ai-sage/GigaChat3.1-Audio-10B-A1.8B"
-              print(f"[ INFO ] Memuat processor dan model {model_name}...")
+              model_dir = "models_gigachat"
+              print(f"[ INFO ] Memuat processor dan model lokal dari {model_dir}...")
               
-              processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
+              processor = AutoProcessor.from_pretrained(model_dir, trust_remote_code=True)
               model = AutoModelForCausalLM.from_pretrained(
-                  model_name,
+                  model_dir,
                   trust_remote_code=True,
                   device_map="cpu",
                   torch_dtype=torch.float32,
@@ -282,7 +339,7 @@ jobs:
               
               messages = [{"role": "user", "content": [
                   {"type": "audio", "path": "audio_sample.wav"},
-                  {"type": "text", "text": "Transkripsikan audio ini secara lengkap."},
+                  {"type": "text", "text": "Transkripsikan rekaman audio ini secara lengkap."},
               ]}]
               
               t0 = time.time()
@@ -298,7 +355,7 @@ jobs:
                   out.write(transcript)
                   
               print(f"[ SUCCESS ] GigaChat selesai dalam {dur:.1f} detik ({dur/60:.1f}m):")
-              print(f"\"{transcript[:200]}...\"")
+              print(f"\"{transcript[:300]}...\"")
           except Exception as e:
               print(f"[ ERROR ] GigaChat inferensi gagal: {e}")
               import traceback
@@ -311,7 +368,7 @@ jobs:
         if: always()
         run: |
           echo "### 🎙️ Hasil Transkripsi: GigaChat 3.1 Audio 10B" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Model**: \`ai-sage/GigaChat3.1-Audio-10B-A1.8B\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Model**: \`ai-sage/GigaChat3.1-Audio-10B-A1.8B (Local Shards)\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Item ID**: \`$AUDIO_ITEM_ID\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ -s outputs/gigachat_transcript.txt ]; then
@@ -329,7 +386,7 @@ jobs:
           retention-days: 7
 
   # ═════════════════════════════════════════════════════════════════════════════
-  # INSTANCE 3: FIXIE.AI ULTRAVOX (v0.5)
+  # INSTANCE 3: FIXIE.AI ULTRAVOX
   # ═════════════════════════════════════════════════════════════════════════════
   test_ultravox:
     name: "🎙️ [Instance 3] Fixie.ai Ultravox"
@@ -361,9 +418,32 @@ jobs:
           sudo swapon /swapfile_extra
           free -h
 
-      - name: Install Python Dependencies
+      - name: Install Python Dependencies (with PEFT)
         run: |
-          pip install --no-cache-dir transformers accelerate soundfile librosa pydub torch torchaudio
+          pip install --no-cache-dir transformers peft accelerate soundfile librosa pydub torch torchaudio
+
+      - name: Download Ultravox Model Shards via aria2c (Fast 16 Threads)
+        run: |
+          mkdir -p models_ultravox
+          python3 - << 'EOF'
+          import urllib.request, json, subprocess, os
+          repo_id = "fixie-ai/ultravox-v0_4_1-mistral-nemo"
+          dest_dir = "models_ultravox"
+          api_url = f"https://huggingface.co/api/models/{repo_id}"
+          req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+          with urllib.request.urlopen(req) as resp:
+              data = json.loads(resp.read().decode())
+          files = [s["rfilename"] for s in data.get("siblings", []) if not s["rfilename"].startswith(".")]
+          
+          with open("aria2_ultravox.txt", "w") as f:
+              for fn in files:
+                  url = f"https://huggingface.co/{repo_id}/resolve/main/{fn}"
+                  f.write(f"{url}\n  dir={dest_dir}\n  out={fn}\n")
+                  
+          print(f"[ INFO ] Mengunduh {len(files)} berkas Ultravox via aria2c 16 thread...")
+          subprocess.run(["aria2c", "-i", "aria2_ultravox.txt", "-j", "16", "-x", "16", "-s", "16", "-k", "1M", "--allow-overwrite=true", "--auto-file-renaming=false", "--summary-interval=5", "--console-log-level=warn"], check=True)
+          EOF
+          ls -lh models_ultravox/
 
       - name: Download Broadcast Audio via Worker Proxy
         run: |
@@ -416,12 +496,11 @@ jobs:
           
           try:
               import transformers
-              # Coba varian non-gated mistral-nemo atau v0_5
-              model_name = "fixie-ai/ultravox-v0_4_1-mistral-nemo"
-              print(f"[ INFO ] Memuat pipeline {model_name}...")
+              model_dir = "models_ultravox"
+              print(f"[ INFO ] Memuat pipeline Ultravox dari {model_dir}...")
               
               pipe = transformers.pipeline(
-                  model=model_name,
+                  model=model_dir,
                   trust_remote_code=True,
                   device="cpu",
                   torch_dtype=torch.float32
@@ -441,7 +520,7 @@ jobs:
                   out.write(transcript)
                   
               print(f"[ SUCCESS ] Ultravox selesai dalam {dur:.1f} detik ({dur/60:.1f}m):")
-              print(f"\"{transcript[:200]}...\"")
+              print(f"\"{transcript[:300]}...\"")
           except Exception as e:
               print(f"[ ERROR ] Ultravox inferensi gagal: {e}")
               import traceback
@@ -454,7 +533,7 @@ jobs:
         if: always()
         run: |
           echo "### 🎙️ Hasil Transkripsi: Fixie.ai Ultravox" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Model**: \`fixie-ai/ultravox\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Model**: \`fixie-ai/ultravox (Local Shards)\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Item ID**: \`$AUDIO_ITEM_ID\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ -s outputs/ultravox_transcript.txt ]; then
