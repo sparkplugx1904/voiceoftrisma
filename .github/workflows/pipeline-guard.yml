@@ -98,8 +98,8 @@ jobs:
           MAX_SCAN="${INPUT_MAX_SCAN:-1000}"
 
           # Penentuan mode & limit:
-          # - transcribe_only: 10 worker paralel
-          # - describe_only: 5 worker paralel
+          # - transcribe: 10 worker paralel
+          # - describe: 5 worker paralel
           MODE="${INPUT_MODE:-auto}"
           if [ -n "$INPUT_LIMIT" ]; then
             LIMIT="$INPUT_LIMIT"
@@ -108,7 +108,7 @@ jobs:
           elif [ "$MODE" = "describe_only" ]; then
             LIMIT=5
           else
-            LIMIT=5
+            LIMIT=15
           fi
           echo "Event: $EVENT_NAME | Mode: $MODE | Limit: $LIMIT | Max scan: $MAX_SCAN"
 
@@ -126,7 +126,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      max-parallel: 5
+      max-parallel: 10
       matrix:
         include: ${{ fromJson(needs.scan.outputs.transcribe_matrix) }}
 

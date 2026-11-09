@@ -75,9 +75,9 @@ export async function triggerWorkflows(
 }
 
 /* Cron 0 * * * *: trigger pipeline guard.
-   - Jam 00:00, 06:00, 12:00, 18:00 WITA (UTC 16, 22, 04, 10):
-     transcribe_only (limit 10 runner paralel)
-   - Auto describe_only tiap 1 jam dinonaktifkan sementara.
+   - Dijalankan pada jam 00:00, 06:00, 12:00, 18:00 WITA (UTC 16, 22, 04, 10).
+   - Mode auto: 10 transcribe paralel dan 5 describe paralel (instance terpisah).
+   - Describe tidak lagi berjalan tiap 1 jam, melainkan selaras dengan jadwal transcribe.
 */
 export async function triggerPipelineGuard(
 	env: Env
@@ -90,19 +90,18 @@ export async function triggerPipelineGuard(
 
 	const utcHour = new Date().getUTCHours();
 	// WITA = UTC+8. WITA 00, 06, 12, 18 -> UTC 16, 22, 04, 10
-	const isTranscribeHour = [4, 10, 16, 22].includes(utcHour);
+	const isScheduledHour = [4, 10, 16, 22].includes(utcHour);
 
-	// Auto describe-only tiap 1 jam dinonaktifkan sementara (hanya jalankan transcribe_only pada jam 00, 06, 12, 18 WITA)
-	if (!isTranscribeHour) {
-		console.log("[ SKIP ] Auto describe_only tiap jam dinonaktifkan.");
+	if (!isScheduledHour) {
+		console.log(`[ SKIP ] Jam ${utcHour}:00 UTC di luar jadwal perbaikan (00:00, 06:00, 12:00, 18:00 WITA).`);
 		return { workflow: "pipeline-guard.yml", status: 200, ok: true };
 	}
 
-	const mode = "transcribe_only";
-	const limit = "10";
+	const mode = "auto";
+	const limit = "15"; // 10 transcribe + 5 describe
 	const result = await triggerWorkflow("pipeline-guard.yml", token, { mode, limit, max_scan: "1000" });
 	if (result.ok) {
-		console.log(`[ OK ] pipeline-guard.yml triggered (mode=${mode}, limit=${limit})`);
+		console.log(`[ OK ] pipeline-guard.yml triggered pada jam jadwal (${utcHour}:00 UTC) -> 10 transcribe + 5 describe paralel`);
 	} else {
 		console.error(`[FAIL] pipeline-guard.yml → ${result.status}: ${result.error || "Unknown error"}`);
 	}

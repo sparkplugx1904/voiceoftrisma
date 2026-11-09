@@ -274,19 +274,21 @@ def scan_pipeline(
 
     tasks = []
     if mode == "auto":
-        # Prioritas transkripsi lebih dulu, lalu deskripsi
-        tasks.extend(transcribe_needed)
-        tasks.extend(describe_needed)
+        # Mode auto: 10 transcribe paralel + 5 describe paralel pada jam 00, 06, 12, 18 WITA
+        trans_lim = 10 if (not limit or limit == 15) else min(10, limit)
+        desc_lim = 5 if (not limit or limit == 15) else min(5, max(1, limit - trans_lim))
+        selected_trans = transcribe_needed[:trans_lim]
+        selected_desc = describe_needed[:desc_lim]
+        tasks = selected_trans + selected_desc
     elif mode == "describe_first":
-        # Prioritas perbaikan cepat deskripsi lebih dulu
         tasks.extend(describe_needed)
         tasks.extend(transcribe_needed)
+        tasks = tasks[:limit]
     elif mode == "transcribe_only":
-        tasks.extend(transcribe_needed)
+        tasks = transcribe_needed[:limit or 10]
     elif mode == "describe_only":
-        tasks.extend(describe_needed)
+        tasks = describe_needed[:limit or 5]
     elif mode == "balanced":
-        # Selang-seling antara transcribe dan describe
         i, j = 0, 0
         while i < len(transcribe_needed) or j < len(describe_needed):
             if i < len(transcribe_needed):
@@ -295,13 +297,14 @@ def scan_pipeline(
             if j < len(describe_needed):
                 tasks.append(describe_needed[j])
                 j += 1
+        tasks = tasks[:limit]
+    else:
+        tasks = tasks[:limit]
 
-    # Batasi sesuai limit
-    selected_tasks = tasks[:limit]
+    selected_tasks = tasks
     log(f"Dipilih {len(selected_tasks)} task untuk dijalankan (limit={limit}, mode={mode}).")
     for idx, t in enumerate(selected_tasks, 1):
         log(f"  {idx}. [{t['action']}] {t['item_id']} -> {t.get('audio_url') or t.get('srt_url')}")
-
     return selected_tasks, stats
 
 
@@ -352,8 +355,8 @@ def export_github_outputs(tasks: List[Dict], stats: Optional[Dict] = None):
     has_items = bool(tasks)
 
     # Pisahkan task berdasarkan kebutuhan
-    transcribe_tasks = [t for t in tasks if t.get("action") in ("transcribe_and_describe", "transcribe_only")]
-    describe_tasks = [t for t in tasks if t.get("action") == "describe_only"]
+    transcribe_tasks = [t for t in tasks if t.get("action") in ("transcribe_and_describe", "transcribe_only")][:10]
+    describe_tasks = [t for t in tasks if t.get("action") == "describe_only"][:5]
 
     safe_dummy = [{"item_id": "skip", "action": "skip", "audio_url": "", "srt_url": ""}]
     safe_matrix = tasks if has_items else safe_dummy
