@@ -19,15 +19,17 @@ Jalankan skrip setup otomatis yang sudah disediakan di folder `main/`:
 # Untuk keperluan perekaman audio saja
 python main/setup.py record
 
-# Untuk keperluan transkripsi AI dan descriptor
+# Untuk keperluan transkripsi audio AI
 python main/setup.py transcript
-```
+
+# Untuk keperluan deskripsi Qwen LLM dan pengunggahan Archive.org
+python main/setup.py descript
 
 Atau instal langsung menggunakan pip:
 ```bash
 python -m pip install -r requirements/record
 python -m pip install -r requirements/transcript
-```
+python -m pip install -r requirements/descript
 
 ---
 

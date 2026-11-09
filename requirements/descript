@@ -1,0 +1,8 @@
+# Description & Archive dependencies (Qwen LLM / Gemini fallback + Archive.org upload)
+# Digunakan oleh: descriptor.py, archive.py, ask.py, clean.py
+requests
+urllib3
+internetarchive
+python-dotenv
+google-genai
+pydantic

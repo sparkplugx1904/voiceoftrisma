@@ -138,9 +138,8 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install System Dependencies
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq aria2 internetarchive
+      - name: Setup Description Environment
+        run: python main/setup.py descript
 
       - name: Configure 40GB Swap
         run: |

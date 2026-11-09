@@ -137,11 +137,13 @@ def setup_record():
             print(f"  ✓  chmod +x {bin_name}")
 
     # ── pip install (dari requirements/ di checkout repo) ──
+    req = os.path.join(os.path.dirname(__file__), "..", "requirements", "record")
+    if not os.path.exists(req):
+        req = "requirements/record"
     try:
-        run([sys.executable, "-m", "pip", "install", "-r", "requirements/record"])
+        run([sys.executable, "-m", "pip", "install", "-r", req])
     except subprocess.CalledProcessError:
-        print("\n❌  pip install gagal.")
-        print("  ·  Coba manual: pip install -r requirements/record\n")
+        print(f"\n❌  pip install gagal untuk {req}.")
         sys.exit(1)
 
     print("\n✓  Setup record selesai.\n")
@@ -231,19 +233,61 @@ def setup_transcript():
     else:
         print(f"  ·  {req} not found, skipping pip install.")
 
-    # 4. Install archive tool
-    run(["sudo", "apt", "install", "-y", "internetarchive"])
-
+    # 4. Install archive tool & aria2 (jika di Linux apt)
+    if os.name != "nt" and shutil.which("apt-get"):
+        try:
+            run(["sudo", "apt-get", "update", "-qq"])
+            run(["sudo", "apt-get", "install", "-y", "-qq", "internetarchive", "aria2"])
+        except Exception as e:
+            print(f"  ·  Apt install error (ignored): {e}")
     print("\n✓  Setup transcript selesai.\n")
 
+def setup_descript():
+    """
+    Setup untuk job "Generate Description / Descriptor" (Qwen LLM / Gemini fallback + Archive.org upload).
+
+    1. Chmod binary llama-server, llama-cli di bin/linux-x64/
+    2. Install dependencies via pip dari requirements/descript (internetarchive, requests, dll)
+    3. Install apt tools (aria2, internetarchive) jika Linux
+    """
+    print("\n── Setup descript ──\n")
+
+    # 1. Chmod binaries untuk inference server
+    for binfile in ("llama-server", "llama-cli", "whisper-cli"):
+        for base_dir in ("bin/linux-x64", "bin"):
+            dest = os.path.join(base_dir, binfile)
+            if os.path.exists(dest) and os.name != "nt":
+                os.chmod(dest, os.stat(dest).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+                print(f"  ✓  chmod +x {dest}")
+
+    # 2. pip install requirements/descript
+    req = os.path.join(os.path.dirname(__file__), "..", "requirements", "descript")
+    if not os.path.exists(req):
+        req = "requirements/descript"
+    if os.path.exists(req):
+        try:
+            run([sys.executable, "-m", "pip", "install", "-r", req])
+        except subprocess.CalledProcessError:
+            print(f"\n❌  pip install gagal untuk {req}.")
+            sys.exit(1)
+    else:
+        deps = ["requests", "urllib3", "internetarchive", "python-dotenv", "google-genai", "pydantic"]
+        run([sys.executable, "-m", "pip", "install", *deps])
+
+    # 3. Apt packages (aria2 untuk unduh model cepat & internetarchive CLI)
+    if os.name != "nt" and shutil.which("apt-get"):
+        try:
+            run(["sudo", "apt-get", "update", "-qq"])
+            run(["sudo", "apt-get", "install", "-y", "-qq", "aria2", "internetarchive"])
+        except Exception as e:
+            print(f"  ·  Apt install error (ignored): {e}")
+
+    print("\n✓  Setup descript selesai.\n")
+
+
 def setup_guard():
-    """
-    Setup untuk job Pipeline Guard (inspeksi arsip, Gemini descriptor, Archive.org push).
-    """
-    print("\n── Setup Pipeline Guard ──\n")
-    deps = ["google-genai", "pydantic", "internetarchive", "requests"]
-    run([sys.executable, "-m", "pip", "install", *deps])
-    print("\n✓  Setup Pipeline Guard selesai.\n")
+    """Alias untuk setup_descript."""
+    setup_descript()
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────
@@ -251,12 +295,12 @@ def setup_guard():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="VoT setup utility — install dependencies untuk recording / transkripsi.",
+        description="VoT setup utility — install dependencies untuk recording, transkripsi, atau deskripsi.",
     )
     parser.add_argument(
         "mode",
-        choices=["record", "transcript", "hybrid", "guard"],
-        help="Mode: 'record', 'transcript', 'hybrid', atau 'guard' (Pipeline Guard & Gemini descriptor)",
+        choices=["record", "transcript", "descript", "describe", "hybrid", "guard"],
+        help="Mode: 'record', 'transcript', 'descript' (atau 'describe'), 'hybrid' (record+transcript), atau 'guard'",
     )
 
     args = parser.parse_args()
@@ -265,12 +309,10 @@ def main():
         setup_record()
     elif args.mode == "transcript":
         setup_transcript()
+    elif args.mode in ("descript", "describe", "guard"):
+        setup_descript()
     elif args.mode == "hybrid":
         setup_record()
         setup_transcript()
-    elif args.mode == "guard":
-        setup_guard()
-
-
 if __name__ == "__main__":
     main()
