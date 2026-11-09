@@ -1,0 +1,303 @@
+name: 🧪 Test Qwen3-Omni Audio Transcribe
+
+on:
+  workflow_dispatch:
+    inputs:
+      audio_broadcast:
+        description: "Pilihan siaran audio ~2 jam untuk diuji"
+        type: choice
+        required: true
+        default: "jumat"
+        options:
+          - "jumat"
+          - "sabtu"
+          - "keduanya"
+      quant_level:
+        description: "Pilihan kuantisasi model Qwen3-Omni (Q4_K_M = 18.5 GB, Q8_0 = 32.5 GB)"
+        type: choice
+        required: true
+        default: "Q4_K_M"
+        options:
+          - "Q4_K_M"
+          - "Q8_0"
+      segment_minutes:
+        description: "Durasi pemotongan segmen audio dalam menit (default: 15 menit per segmen)"
+        required: false
+        default: "15"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-qwen-omni-${{ inputs.quant_level }}-${{ inputs.audio_broadcast }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  qwen_omni_parallel:
+    name: "🎙️ [Qwen3-Omni] ${{ matrix.title }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - target: "jumat"
+            item_id: "vot-denpasar-20261106-183004"
+            title: "Jumat, 06 November 2026 (~2 Jam 16 Menit)"
+            audio_name: "VOT-Denpasar_06-11-26-0.mp3"
+            date: "2026-11-06"
+
+          - target: "sabtu"
+            item_id: "vot-denpasar-20261107-183001"
+            title: "Sabtu, 07 November 2026 (~2 Jam 30 Menit)"
+            audio_name: "VOT-Denpasar_07-11-26-0.mp3"
+            date: "2026-11-07"
+
+    steps:
+      - name: Checkout Repository
+        if: inputs.audio_broadcast == 'keduanya' || inputs.audio_broadcast == matrix.target
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        if: inputs.audio_broadcast == 'keduanya' || inputs.audio_broadcast == matrix.target
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # ── 1. Instalasi FFmpeg & aria2 ─────────────────────────────────────────
+      - name: Install System Dependencies
+        if: inputs.audio_broadcast == 'keduanya' || inputs.audio_broadcast == matrix.target
+        run: |
+          echo "[ INFO ] Menginstal FFmpeg dan aria2c..."
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg aria2
+
+      # ── 2. Pembersihan Disk & Alokasi Swap (32GB untuk Q4, 40GB untuk Q8) ────
+      - name: Configure Swapfile
+        if: inputs.audio_broadcast == 'keduanya' || inputs.audio_broadcast == matrix.target
+        env:
+          QUANT: ${{ inputs.quant_level || 'Q4_K_M' }}
+        run: |
+          echo "=== Membersihkan Ruang Disk Runner ==="
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift 2>/dev/null || true
+          df -h /
+          
+          SWAP_SIZE="32G"
+          if [ "$QUANT" = "Q8_0" ]; then
+            SWAP_SIZE="40G"
+          fi
+          
+          echo "Mengalokasikan ${SWAP_SIZE} swapfile untuk Qwen3-Omni ${QUANT}..."
+          sudo fallocate -l "${SWAP_SIZE}" /swapfile_extra || sudo dd if=/dev/zero of=/swapfile_extra bs=1M count=32768
+          sudo chmod 600 /swapfile_extra
+          sudo mkswap /swapfile_extra
+          sudo swapon /swapfile_extra
+          free -h
+
+      # ── 3. Unduh Model GGUF & Audio Projector (mmproj) ──────────────────────
+      - name: Download Qwen3-Omni Model & mmproj
+        if: inputs.audio_broadcast == 'keduanya' || inputs.audio_broadcast == matrix.target
+        env:
+          QUANT: ${{ inputs.quant_level || 'Q4_K_M' }}
+        run: |
+          mkdir -p models_qwen_omni
+          
+          MMPROJ_URL="https://huggingface.co/ggml-org/Qwen3-Omni-30B-A3B-Instruct-GGUF/resolve/main/mmproj-Qwen3-Omni-30B-A3B-Instruct-Q8_0.gguf"
+          MMPROJ_FILE="mmproj-Qwen3-Omni-30B-A3B-Instruct-Q8_0.gguf"
+          
+          if [ "$QUANT" = "Q8_0" ]; then
+            DECODER_URL="https://huggingface.co/ggml-org/Qwen3-Omni-30B-A3B-Instruct-GGUF/resolve/main/Qwen3-Omni-30B-A3B-Instruct-Q8_0.gguf"
+            DECODER_FILE="Qwen3-Omni-30B-A3B-Instruct-Q8_0.gguf"
+          else
+            DECODER_URL="https://huggingface.co/ggml-org/Qwen3-Omni-30B-A3B-Instruct-GGUF/resolve/main/Qwen3-Omni-30B-A3B-Instruct-Q4_K_M.gguf"
+            DECODER_FILE="Qwen3-Omni-30B-A3B-Instruct-Q4_K_M.gguf"
+          fi
+          
+          echo "[ INFO ] Mengunduh audio projector (mmproj Q8_0 ~1.2 GB)..."
+          aria2c -x 16 -s 16 -k 1M --file-allocation=none \
+            --allow-overwrite=true --auto-file-renaming=false \
+            -d models_qwen_omni -o "$MMPROJ_FILE" "$MMPROJ_URL"
+          
+          echo "[ INFO ] Mengunduh decoder ($QUANT)..."
+          aria2c -x 16 -s 16 -k 1M --file-allocation=none \
+            --allow-overwrite=true --auto-file-renaming=false \
+            -d models_qwen_omni -o "$DECODER_FILE" "$DECODER_URL"
+          
+          echo "DECODER_PATH=models_qwen_omni/$DECODER_FILE" >> $GITHUB_ENV
+          echo "MMPROJ_PATH=models_qwen_omni/$MMPROJ_FILE" >> $GITHUB_ENV
+          
+          echo "[ OK ] Model siap di disk:"
+          ls -lh models_qwen_omni/
+
+      # ── 4. Unduh Berkas Audio Siaran via Worker Proxy ───────────────────────
+      - name: Download Broadcast Audio via Worker Proxy
+        if: inputs.audio_broadcast == 'keduanya' || inputs.audio_broadcast == matrix.target
+        env:
+          ITEM_ID: ${{ matrix.item_id }}
+          AUDIO_NAME: ${{ matrix.audio_name }}
+        run: |
+          mkdir -p audio_downloads
+          python3 -c "
+          from pathlib import Path
+          from main.core.downloader import download_archive_file
+          import os, sys
+          item = os.environ['ITEM_ID']
+          name = os.environ['AUDIO_NAME']
+          url = f'https://archive.org/download/{item}/{name}'
+          dest = Path('audio_downloads') / f'{item}_{name}'
+          if not download_archive_file(url, dest, min_size=5_000_000, is_text=False):
+              sys.exit(1)
+          print(f'[OK] Audio terunduh: {dest} ({dest.stat().st_size / (1024**2):.1f} MB)')
+          "
+          echo "RAW_AUDIO_PATH=audio_downloads/${{ matrix.item_id }}_${{ matrix.audio_name }}" >> $GITHUB_ENV
+
+      # ── 5. Segmentasi Audio Siaran 2 Jam ke Potongan 15 Menit ───────────────
+      - name: Segment Audio into 16kHz Mono WAV Chunks
+        if: inputs.audio_broadcast == 'keduanya' || inputs.audio_broadcast == matrix.target
+        env:
+          SEGMENT_MIN: ${{ inputs.segment_minutes || '15' }}
+        run: |
+          mkdir -p chunks
+          python3 - << 'EOF'
+          import subprocess, os, json, sys
+          
+          raw_audio = os.environ["RAW_AUDIO_PATH"]
+          seg_min = int(os.environ.get("SEGMENT_MIN", "15"))
+          step_sec = seg_min * 60
+          
+          # Ambil total durasi via ffprobe
+          cmd_probe = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", raw_audio]
+          duration_str = subprocess.check_output(cmd_probe).decode().strip()
+          total_sec = float(duration_str)
+          print(f"[ CHUNKER ] Total durasi audio: {total_sec:.1f} detik ({total_sec / 60:.1f} menit)")
+          
+          chunks_manifest = []
+          part = 1
+          for start in range(0, int(total_sec), step_sec):
+              end = min(start + step_sec, int(total_sec))
+              dur = end - start
+              chunk_path = f"chunks/part_{part:02d}_{start}s-{end}s.wav"
+              
+              print(f"  · Memproses chunk {part}: {start}s s/d {end}s ({dur}s)...")
+              cmd_cut = [
+                  "ffmpeg", "-y", "-ss", str(start), "-t", str(dur),
+                  "-i", raw_audio,
+                  "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
+                  chunk_path
+              ]
+              subprocess.run(cmd_cut, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+              chunks_manifest.append({"file": chunk_path, "start": start, "end": end})
+              part += 1
+              
+          with open("chunks/manifest.json", "w") as f:
+              json.dump(chunks_manifest, f, indent=2)
+          print(f"[ OK ] Selesai membuat {len(chunks_manifest)} segmen audio 16kHz.")
+          EOF
+
+      # ── 6. Jalankan Transkripsi Qwen3-Omni per Segmen ───────────────────────
+      - name: Run Qwen3-Omni Transcription
+        if: inputs.audio_broadcast == 'keduanya' || inputs.audio_broadcast == matrix.target
+        run: |
+          chmod +x bin/linux-x64/llama-cli
+          mkdir -p outputs
+          
+          python3 - << 'EOF'
+          import subprocess, os, json, time
+          
+          with open("chunks/manifest.json", "r") as f:
+              manifest = json.load(f)
+              
+          decoder = os.environ["DECODER_PATH"]
+          mmproj = os.environ["MMPROJ_PATH"]
+          
+          def fmt_srt(sec):
+              ms = int((sec % 1) * 1000)
+              ts = int(sec)
+              return f"{ts//3600:02d}:{(ts%3600)//60:02d}:{ts%60:02d},{ms:03d}"
+          
+          full_txt = []
+          srt_blocks = []
+          counter = 1
+          
+          prompt_text = "Transkripsikan audio rekaman ini secara akurat dan lengkap ke dalam bahasa Indonesia. Tuliskan teks transkrip saja."
+          
+          print("=" * 65)
+          print(f"[ INFERENCE ] Memulai transkripsi {len(manifest)} segmen dengan Qwen3-Omni...")
+          print("=" * 65)
+          
+          for idx, item in enumerate(manifest, start=1):
+              fpath = item["file"]
+              start_s = item["start"]
+              end_s = item["end"]
+              
+              print(f"\n▶ Segmen {idx}/{len(manifest)}: {fpath} ({start_s}s - {end_s}s)...")
+              t0 = time.time()
+              
+              cmd = [
+                  "./bin/linux-x64/llama-cli",
+                  "-m", decoder,
+                  "--mmproj", mmproj,
+                  "--audio", fpath,
+                  "-p", prompt_text,
+                  "-t", str(os.cpu_count() or 2),
+                  "-c", "8192",
+                  "--no-warmup"
+              ]
+              
+              res = subprocess.run(cmd, capture_output=True, text=True)
+              raw_out = res.stdout.strip()
+              
+              # Bersihkan header/banner llama-cli dari output teks
+              cleaned_text = raw_out
+              if "\n\n" in cleaned_text:
+                  parts = cleaned_text.split("\n\n")
+                  # Ambil bagian teks respon terakhir
+                  cleaned_text = parts[-1].strip()
+                  
+              dur = time.time() - t0
+              print(f"  ✓ Selesai dalam {dur:.1f} detik:")
+              print(f"    \"{cleaned_text[:120]}...\"")
+              
+              full_txt.append(f"[{fmt_srt(start_s)} --> {fmt_srt(end_s)}]\n{cleaned_text}")
+              srt_blocks.append(f"{counter}\n{fmt_srt(start_s)} --> {fmt_srt(end_s)}\n{cleaned_text}\n")
+              counter += 1
+              
+          with open("outputs/qwen_omni_transcript.txt", "w", encoding="utf-8") as f:
+              f.write("\n\n".join(full_txt))
+              
+          with open("outputs/qwen_omni_transcript.srt", "w", encoding="utf-8") as f:
+              f.write("\n".join(srt_blocks))
+              
+          print("\n[ SUCCESS ] Seluruh segmen berhasil ditranskripsikan ke outputs/!")
+          EOF
+
+      # ── 7. Ringkasan Hasil ke GitHub Step Summary ───────────────────────────
+      - name: Log Step Summary
+        if: always() && (inputs.audio_broadcast == 'keduanya' || inputs.audio_broadcast == matrix.target)
+        env:
+          TITLE: ${{ matrix.title }}
+          ITEM_ID: ${{ matrix.item_id }}
+          QUANT: ${{ inputs.quant_level || 'Q4_K_M' }}
+        run: |
+          echo "### 🎙️ Hasil Transkripsi Qwen3-Omni Audio: $TITLE" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Archive Item ID**: [\`$ITEM_ID\`](https://archive.org/details/$ITEM_ID)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Model**: \`Qwen3-Omni-30B-A3B-Instruct ($QUANT)\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Status Eksekusi**: ${{ job.status == 'success' && '✅ Berhasil' || '❌ Gagal' }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          
+          if [ -s outputs/qwen_omni_transcript.txt ]; then
+            echo "#### 📜 Teks Transkripsi yang Dihasilkan (30 Baris Pertama):" >> "$GITHUB_STEP_SUMMARY"
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            head -n 30 outputs/qwen_omni_transcript.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ── 8. Simpan Artifact Hasil Uji Coba ───────────────────────────────────
+      - name: Upload Artifacts
+        if: always() && (inputs.audio_broadcast == 'keduanya' || inputs.audio_broadcast == matrix.target)
+        uses: actions/upload-artifact@v4
+        with:
+          name: qwen-omni-${{ matrix.item_id }}-${{ inputs.quant_level }}
+          path: outputs/
+          retention-days: 7
