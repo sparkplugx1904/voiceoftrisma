@@ -195,35 +195,117 @@ jobs:
           print(f"[ OK ] Selesai membuat {len(chunks_manifest)} segmen audio 16kHz.")
           EOF
 
-      # ── 6. Jalankan Transkripsi Qwen3-Omni per Segmen ───────────────────────
-      - name: Run Qwen3-Omni Transcription
+      # ── 6. Jalankan llama-server di Background dengan --mmproj ─────────────
+      - name: Start Llama Server with mmproj
         if: inputs.audio_broadcast == 'keduanya' || inputs.audio_broadcast == matrix.target
         run: |
-          chmod +x bin/linux-x64/llama-cli
-          mkdir -p outputs
+          chmod +x bin/linux-x64/llama-server
+          echo "[ INFO ] Memulai llama-server dengan model dan mmproj..."
+          nohup ./bin/linux-x64/llama-server \
+            -m "$DECODER_PATH" \
+            --mmproj "$MMPROJ_PATH" \
+            -c 32768 \
+            -b 512 \
+            -ub 256 \
+            -t $(nproc) \
+            --jinja \
+            --port 8080 > server.log 2>&1 &
           
+          echo "[ INFO ] Menunggu inisialisasi model dan mmproj di server..."
+          READY=0
+          for i in $(seq 1 120); do
+            if curl -s http://127.0.0.1:8080/health | grep -qi "ok\|ready\|status"; then
+              echo "[ OK ] llama-server siap merespons!"
+              READY=1
+              break
+            fi
+            sleep 5
+          done
+          
+          if [ $READY -eq 0 ]; then
+            echo "[ ERROR ] llama-server gagal siap!"
+            cat server.log
+            exit 1
+          fi
+
+      # ── 7. Jalankan Transkripsi Audio via Server API ────────────────────────
+      - name: Run Qwen3-Omni Audio Transcription via Server
+        if: inputs.audio_broadcast == 'keduanya' || inputs.audio_broadcast == matrix.target
+        run: |
+          mkdir -p outputs
           python3 - << 'EOF'
-          import subprocess, os, json, time
+          import json, os, time, base64, urllib.request, urllib.error
           
           with open("chunks/manifest.json", "r") as f:
               manifest = json.load(f)
               
-          decoder = os.environ["DECODER_PATH"]
-          mmproj = os.environ["MMPROJ_PATH"]
+          server_url = "http://127.0.0.1:8080/v1/chat/completions"
+          prompt_text = "Transkripsikan audio rekaman radio ini secara akurat, utuh, dan lengkap ke dalam bahasa Indonesia. Tampilkan teks transkripsi saja tanpa pembuka atau penutup."
           
           def fmt_srt(sec):
               ms = int((sec % 1) * 1000)
               ts = int(sec)
               return f"{ts//3600:02d}:{(ts%3600)//60:02d}:{ts%60:02d},{ms:03d}"
           
+          def transcribe_audio_chunk(audio_file):
+              with open(audio_file, "rb") as af:
+                  b64_audio = base64.b64encode(af.read()).decode("utf-8")
+              
+              # Coba format input_audio standar
+              payload = {
+                  "messages": [
+                      {
+                          "role": "user",
+                          "content": [
+                              {"type": "text", "text": prompt_text},
+                              {
+                                  "type": "input_audio",
+                                  "input_audio": {
+                                      "data": b64_audio,
+                                      "format": "wav"
+                                  }
+                              }
+                          ]
+                      }
+                  ],
+                  "temperature": 0.0,
+                  "max_tokens": 4096
+              }
+              
+              req = urllib.request.Request(
+                  server_url,
+                  data=json.dumps(payload).encode("utf-8"),
+                  headers={"Content-Type": "application/json"}
+              )
+              
+              try:
+                  with urllib.request.urlopen(req, timeout=600) as resp:
+                      res_json = json.loads(resp.read().decode("utf-8"))
+                      return res_json["choices"][0]["message"]["content"].strip()
+              except urllib.error.HTTPError as e:
+                  err_msg = e.read().decode("utf-8", errors="ignore")
+                  print(f"  [WARN] input_audio error ({e.code}: {err_msg}), mencoba format data URI...")
+                  
+                  # Fallback format image_url data URI
+                  payload["messages"][0]["content"] = [
+                      {"type": "text", "text": prompt_text},
+                      {"type": "image_url", "image_url": {"url": f"data:audio/wav;base64,{b64_audio}"}}
+                  ]
+                  req2 = urllib.request.Request(
+                      server_url,
+                      data=json.dumps(payload).encode("utf-8"),
+                      headers={"Content-Type": "application/json"}
+                  )
+                  with urllib.request.urlopen(req2, timeout=600) as resp2:
+                      res_json2 = json.loads(resp2.read().decode("utf-8"))
+                      return res_json2["choices"][0]["message"]["content"].strip()
+
           full_txt = []
           srt_blocks = []
           counter = 1
           
-          prompt_text = "Transkripsikan audio rekaman ini secara akurat dan lengkap ke dalam bahasa Indonesia. Tuliskan teks transkrip saja."
-          
           print("=" * 65)
-          print(f"[ INFERENCE ] Memulai transkripsi {len(manifest)} segmen dengan Qwen3-Omni...")
+          print(f"[ INFERENCE ] Memproses {len(manifest)} segmen audio via llama-server API...")
           print("=" * 65)
           
           for idx, item in enumerate(manifest, start=1):
@@ -234,35 +316,18 @@ jobs:
               print(f"\n▶ Segmen {idx}/{len(manifest)}: {fpath} ({start_s}s - {end_s}s)...")
               t0 = time.time()
               
-              cmd = [
-                  "./bin/linux-x64/llama-cli",
-                  "-m", decoder,
-                  "--mmproj", mmproj,
-                  "--audio", fpath,
-                  "-p", prompt_text,
-                  "-t", str(os.cpu_count() or 2),
-                  "-c", "8192",
-                  "--no-warmup"
-              ]
-              
-              res = subprocess.run(cmd, capture_output=True, text=True)
-              raw_out = res.stdout.strip()
-              
-              # Bersihkan header/banner llama-cli dari output teks
-              cleaned_text = raw_out
-              if "\n\n" in cleaned_text:
-                  parts = cleaned_text.split("\n\n")
-                  # Ambil bagian teks respon terakhir
-                  cleaned_text = parts[-1].strip()
+              try:
+                  text = transcribe_audio_chunk(fpath)
+                  dur = time.time() - t0
+                  print(f"  ✓ Selesai dalam {dur:.1f} detik:")
+                  print(f"    \"{text[:120]}...\"")
                   
-              dur = time.time() - t0
-              print(f"  ✓ Selesai dalam {dur:.1f} detik:")
-              print(f"    \"{cleaned_text[:120]}...\"")
-              
-              full_txt.append(f"[{fmt_srt(start_s)} --> {fmt_srt(end_s)}]\n{cleaned_text}")
-              srt_blocks.append(f"{counter}\n{fmt_srt(start_s)} --> {fmt_srt(end_s)}\n{cleaned_text}\n")
-              counter += 1
-              
+                  full_txt.append(f"[{fmt_srt(start_s)} --> {fmt_srt(end_s)}]\n{text}")
+                  srt_blocks.append(f"{counter}\n{fmt_srt(start_s)} --> {fmt_srt(end_s)}\n{text}\n")
+                  counter += 1
+              except Exception as exc:
+                  print(f"  ❌ Gagal memproses segmen {idx}: {exc}")
+                  
           with open("outputs/qwen_omni_transcript.txt", "w", encoding="utf-8") as f:
               f.write("\n\n".join(full_txt))
               
@@ -271,7 +336,6 @@ jobs:
               
           print("\n[ SUCCESS ] Seluruh segmen berhasil ditranskripsikan ke outputs/!")
           EOF
-
       # ── 7. Ringkasan Hasil ke GitHub Step Summary ───────────────────────────
       - name: Log Step Summary
         if: always() && (inputs.audio_broadcast == 'keduanya' || inputs.audio_broadcast == matrix.target)
