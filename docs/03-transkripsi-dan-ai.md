@@ -37,7 +37,8 @@ flowchart LR
 | **`tiny`** | ~75 MB | Rendah | Sangat Cepat | Pengujian cepat lokal |
 | **`base`** | ~142 MB | Cukup | Cepat | Komputer dengan spek rendah |
 | **`small`** | ~466 MB | Baik | Sedang | Keseimbangan kecepatan & akurasi |
-| **`medium`** | ~1.5 GB | **Sangat Baik** | Sedang | **Pilihan Default di GitHub Actions** |
+| **`medium`** | ~1.5 GB | **Sangat Baik** | Sedang | Transkripsi standar |
+| **`large-v3-turbo`** *(alias: `large-turbo-v3`)* | ~1.6 GB | **Luar Biasa (Tinggi)** | Cepat (Turbo 4-layer) | **Pilihan Default Produksi & Pipeline Guard** |
 | **`large-v3`** | ~3.1 GB | Luar Biasa | Lambat | Transkripsi offline kualitas arsip |
 
 ---

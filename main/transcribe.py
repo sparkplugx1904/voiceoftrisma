@@ -53,8 +53,15 @@ def log_error(msg, exit_app=False):
         sys.exit(1)
 
 # --- Konfigurasi ---
-VALID_MODELS = ["tiny", "base", "small", "medium", "large-v1", "large-v2", "large-v3", "large-v3-turbo"]
-DEFAULT_MODEL_NAME = "small"
+VALID_MODELS = ["tiny", "base", "small", "medium", "large-v1", "large-v2", "large-v3", "large-v3-turbo", "large-turbo-v3"]
+MODEL_ALIASES = {
+    "large-turbo-v3": "large-v3-turbo",
+    "large_turbo_v3": "large-v3-turbo",
+    "large-turbo": "large-v3-turbo",
+    "large_v3_turbo": "large-v3-turbo",
+    "turbo": "large-v3-turbo",
+}
+DEFAULT_MODEL_NAME = "large-v3-turbo"
 DEFAULT_PROMPT = "Voice of Trisma, Madyapadma, Sobat Trisma."
 # --------------------
 
@@ -241,9 +248,11 @@ def ensure_model_exists(model_name: str, custom_model_url: Optional[str]) -> Pat
         return model_path
             
     else:
-        log_info(f"Memeriksa model standar: {model_name}")
-        if model_name not in VALID_MODELS:
-            log_error(f"Nama model standar tidak valid: '{model_name}'. Pilihan: {', '.join(VALID_MODELS)}", exit_app=True)
+        raw_model = model_name
+        model_name = MODEL_ALIASES.get(model_name.lower(), model_name.lower())
+        log_info(f"Memeriksa model standar: {model_name} (input: {raw_model})")
+        if model_name not in VALID_MODELS and raw_model not in VALID_MODELS:
+            log_error(f"Nama model standar tidak valid: '{raw_model}'. Pilihan: {', '.join(VALID_MODELS)}", exit_app=True)
 
         os.makedirs("models", exist_ok=True)
         model_path = Path(f"./models/ggml-{model_name}.bin")

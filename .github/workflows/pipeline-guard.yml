@@ -35,13 +35,16 @@ on:
       whisper_model:
         description: "Model Whisper-CPP untuk transkripsi"
         required: false
-        default: "medium"
+        default: "large-v3-turbo"
         type: choice
         options:
+          - large-v3-turbo
+          - large-turbo-v3
           - medium
           - small
           - base
           - tiny
+          - large-v3
       qwen_quant:
         description: "Kuantisasi model Qwen3.6-35B-A3B untuk deskripsi"
         required: false
@@ -150,9 +153,9 @@ jobs:
           AUDIO_URL: ${{ matrix.audio_url }}
           WHISPER_MODEL: ${{ inputs.whisper_model }}
         run: |
-          MODEL="${WHISPER_MODEL:-medium}"
+          MODEL="${WHISPER_MODEL:-large-v3-turbo}"
           if [ "$MODEL" = "true" ] || [ -z "$MODEL" ]; then
-            MODEL="medium"
+            MODEL="large-v3-turbo"
           fi
           echo "[ INFO ] Transcribing $ITEM_ID dari $AUDIO_URL menggunakan model: $MODEL..."
           python3 -u main/transcribe.py "$AUDIO_URL" "$MODEL"

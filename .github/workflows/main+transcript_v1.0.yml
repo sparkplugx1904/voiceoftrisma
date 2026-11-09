@@ -2,6 +2,17 @@ name: Record and Transcribe v1.0
 
 on:
   workflow_dispatch:
+    inputs:
+      whisper_model:
+        description: "Model Whisper-CPP untuk transkripsi"
+        required: false
+        default: "large-v3-turbo"
+        type: choice
+        options:
+          - large-v3-turbo
+          - large-turbo-v3
+          - medium
+          - small
   # schedule:
   #   - cron: "0 5 * * *"   # Tiap hari jam 05:00 UTC (~13:00 WITA)
 
@@ -88,9 +99,12 @@ jobs:
         run: python main/setup.py transcript
 
       - name: Transcribe audio
+        env:
+          WHISPER_MODEL: ${{ inputs.whisper_model }}
         run: |
-          echo "[ INFO ] Transcribing audio_${{ matrix.pair.suffix }}.mp3..."
-          python3 -u main/transcribe.py "${{ matrix.pair.url }}" medium
+          MODEL="${WHISPER_MODEL:-large-v3-turbo}"
+          echo "[ INFO ] Transcribing audio_${{ matrix.pair.suffix }}.mp3 menggunakan model $MODEL..."
+          python3 -u main/transcribe.py "${{ matrix.pair.url }}" "$MODEL"
 
       - name: Upload transcript artifact
         uses: actions/upload-artifact@v4
