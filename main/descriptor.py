@@ -1,348 +1,179 @@
+#!/usr/bin/env python3
+"""
+Voice of Trisma — Descriptor Engine (Production).
+Menghasilkan description.json dari transkrip siaran (.srt / .txt) menggunakan:
+1. Model Utama: Local LLM Qwen3.6-35B-A3B (via llama-server / ask.py)
+2. Fallback: Google Gemini API (jika server lokal tidak aktif dan key tersedia)
+"""
+
 import os
 import re
 import sys
-import time
 import json
+import time
 import argparse
-from typing import List, Optional
-from pydantic import BaseModel
-from google import genai
-from google.genai import types
-from google.genai.errors import APIError
+import subprocess
+import urllib.request
+from pathlib import Path
+from typing import Optional, Dict, Any
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+_ROOT_DIR = Path(__file__).resolve().parent.parent
+_MAIN_DIR = Path(__file__).resolve().parent
 
-MIN_PERFORMANCE_VERSION = (2, 5)  # Hanya model Flash modern (>= 2.5), tolak model low-perform (1.5, 1.0, lite)
-
-def parse_model_score(name: str) -> tuple:
-    """
-    Ekstrak versi numerik dari nama model.
-    Hanya model 'flash' yang akan dipertimbangkan.
-    Contoh:
-      'gemini-3.8-flash' -> (3, 8)
-      'gemini-3.0-flash' -> (3, 0)
-      'gemini-2.5-flash' -> (2, 5)
-    """
-    match = re.search(r'gemini-(\d+)(?:\.(\d+))?-flash', name.lower())
-    if match:
-        major = int(match.group(1))
-        minor = int(match.group(2)) if match.group(2) else 0
-        return (major, minor)
-    return (-1, -1)
+DEFAULT_SERVER_URL = os.environ.get("LLAMA_SERVER_URL") or "http://127.0.0.1:8080/v1/chat/completions"
+DEFAULT_PROMPT_PATH = str(_MAIN_DIR / "prompt.txt")
 
 
-def get_high_performance_flash_models(client, preferred_model: Optional[str] = None) -> List[str]:
-    """
-    Ambil daftar model Gemini Flash dengan performa tinggi (>= versi 2.5).
-    Model berkinerja rendah (1.5, 1.0, lite, nano) dan eksperimental difilter keluar.
-    """
-    models = []
-    if preferred_model:
-        clean_name = preferred_model.split("/", 1)[1] if preferred_model.startswith("models/") else preferred_model
-        models.append(clean_name)
+def is_local_llama_server_ready(server_url: str = DEFAULT_SERVER_URL) -> bool:
+    """Periksa apakah server inferensi lokal aktif dan siap menerima request."""
+    try:
+        health_url = server_url.replace("/v1/chat/completions", "/health")
+        req = urllib.request.Request(health_url, headers={"User-Agent": "VoT-Descriptor/2.0"})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = resp.read().decode("utf-8", errors="ignore").lower()
+            return "ok" in data or "ready" in data or "status" in data or resp.status == 200
+    except Exception:
+        # Coba request OPTIONS / GET langsung ke server_url
+        try:
+            req = urllib.request.Request(server_url, method="OPTIONS")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                return resp.status < 500
+        except Exception:
+            return False
+
+
+def generate_with_local_qwen(
+    srt_path: str,
+    output_path: str,
+    server_url: str = DEFAULT_SERVER_URL,
+    prompt_path: str = DEFAULT_PROMPT_PATH
+) -> bool:
+    """Hasilkan description.json menggunakan model Qwen lokal via clean.py dan ask.py."""
+    print(f"[DESCRIPTOR] Menjalankan inferensi lokal Qwen via {server_url}...")
+    srt_p = Path(srt_path)
+    out_p = Path(output_path)
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+
+    # 1. Bersihkan transkrip menggunakan main/clean.py
+    clean_proc = subprocess.run(
+        [sys.executable, str(_MAIN_DIR / "clean.py"), str(srt_p)],
+        capture_output=True,
+        text=True,
+        check=True
+    )
+    clean_text = clean_proc.stdout.strip()
+    if not clean_text:
+        print("[DESCRIPTOR] [ERROR] Hasil pembersihan clean.py kosong!")
+        return False
+
+    temp_clean = _ROOT_DIR / "temp_clean_desc.txt"
+    with open(temp_clean, "w", encoding="utf-8") as f:
+        f.write(clean_text)
 
     try:
-        available_models = list(client.models.list())
-        valid_models = []
-        for m in available_models:
-            n = m.name.lower()
-            # Tolak model low-perform, non-text, atau preview/exp
-            if any(x in n for x in ['exp', 'lite', 'nano', 'preview', 'tts', 'audio', 'vision', 'embedding']):
-                continue
-            
-            score = parse_model_score(m.name)
-            # Filter ketat: Hanya model high-performance (>= 2.5)
-            if score >= MIN_PERFORMANCE_VERSION:
-                clean_name = m.name.split("/", 1)[1] if m.name.startswith("models/") else m.name
-                if clean_name not in valid_models:
-                    valid_models.append(clean_name)
+        # 2. Jalankan main/ask.py
+        ask_cmd = [
+            sys.executable,
+            "-u",
+            str(_MAIN_DIR / "ask.py"),
+            prompt_path,
+            str(temp_clean),
+            str(out_p),
+            server_url
+        ]
+        res = subprocess.run(ask_cmd, check=True)
+        return out_p.exists() and out_p.stat().st_size > 10
+    finally:
+        if temp_clean.exists():
+            try:
+                temp_clean.unlink()
+            except Exception:
+                pass
 
-        if valid_models:
-            valid_models.sort(key=parse_model_score, reverse=True)
-            for vm in valid_models:
-                if vm not in models:
-                    models.append(vm)
-            print(f"[INFO] Model high-performance terdeteksi: {models}")
-            return models
 
+def generate_with_gemini_fallback(
+    srt_path: str,
+    output_path: str,
+    model_name: Optional[str] = None
+) -> bool:
+    """Fallback ke Gemini API jika server lokal tidak aktif dan GEMINI_API_KEY tersedia."""
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+    if not gemini_key:
+        print("[DESCRIPTOR] [WARN] GEMINI_API_KEY tidak tersedia untuk fallback.")
+        return False
+
+    print("[DESCRIPTOR] [FALLBACK] Menjalankan inferensi via Google Gemini API...")
+    try:
+        from google import genai
+        client = genai.Client(api_key=gemini_key)
+
+        with open(srt_path, "r", encoding="utf-8") as f:
+            transcript = f.read()
+
+        sys_prompt = open(DEFAULT_PROMPT_PATH, encoding="utf-8").read()
+
+        candidate = model_name or "gemini-2.5-flash"
+        response = client.models.generate_content(
+            model=candidate,
+            contents=[f"Transkrip:\n{transcript}"],
+            config={"system_instruction": sys_prompt, "temperature": 0.6}
+        )
+
+        raw_text = response.text.strip()
+        raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text, flags=re.MULTILINE)
+        raw_text = re.sub(r"\s*```$", "", raw_text, flags=re.MULTILINE).strip()
+
+        data = json.loads(raw_text)
+        out_p = Path(output_path)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_p, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+        print(f"[DESCRIPTOR] [OK] Berhasil menghasilkan deskripsi via Gemini API: {out_p}")
+        return True
     except Exception as e:
-        print(f"[WARNING] Gagal mengambil daftar model dinamis: {e}")
-
-    # Fallback default: hanya model high-performance yang terbukti tangguh
-    default_fallbacks = ["gemini-3.0-flash", "gemini-2.5-flash"]
-    for fb in default_fallbacks:
-        if fb not in models:
-            models.append(fb)
-    print(f"[INFO] Menggunakan model high-performance fallback: {models}")
-    return models
-
-
-def is_transient_error(err: Exception) -> bool:
-    """Cek apakah error bersifat sementara (503, 429, 500, overload, timeout)."""
-    err_str = str(err).lower()
-    if isinstance(err, APIError):
-        if err.code in [503, 429, 500, 502, 504]:
-            return True
-        if err.status in ['UNAVAILABLE', 'RESOURCE_EXHAUSTED', 'INTERNAL']:
-            return True
-    transient_indicators = [
-        '503', '429', 'unavailable', 'resource_exhausted',
-        'high demand', 'spikes in demand', 'temporarily unavailable',
-        'try again later', 'rate limit', 'overloaded', 'timeout', '502', '504'
-    ]
-    return any(ind in err_str for ind in transient_indicators)
-
-
-def resolve_output_path(output_arg: str) -> str:
-    """
-    -o selalu diperlakukan sebagai path file tujuan secara langsung.
-    Direktori induknya dibuat otomatis jika belum ada.
-    """
-    output_dir = os.path.dirname(output_arg)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
-    return output_arg
+        print(f"[DESCRIPTOR] [ERROR] Fallback Gemini API gagal: {e}")
+        return False
 
 
 def generate_description(
     srt_file_path: str,
-    output_arg: str,
-    model_arg: Optional[str] = None,
-    max_retries: int = 4,
-    initial_delay: float = 5.0
+    output_file_path: str,
+    server_url: str = DEFAULT_SERVER_URL,
+    model_arg: Optional[str] = None
 ):
-    if not GEMINI_API_KEY:
-        print("[ERROR] GEMINI_API_KEY tidak ditemukan di environment variable!")
-        sys.exit(1)
+    """Entrypoint utama pembuatan description.json."""
+    # 1. Coba local LLM (Qwen via llama-server) terlebih dahulu
+    if is_local_llama_server_ready(server_url):
+        ok = generate_with_local_qwen(srt_file_path, output_file_path, server_url=server_url)
+        if ok:
+            print(f"[DESCRIPTOR] [SUCCESS] description.json berhasil dibuat via model lokal Qwen: {output_file_path}")
+            return
 
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    # 2. Jika server lokal belum aktif, coba fallback ke Gemini API jika key ada
+    if os.environ.get("GEMINI_API_KEY"):
+        ok = generate_with_gemini_fallback(srt_file_path, output_file_path, model_name=model_arg)
+        if ok:
+            return
 
-    try:
-        with open(srt_file_path, 'r', encoding='utf-8') as f:
-            transcript_content = f.read()
-    except Exception as e:
-        print(f"[ERROR] Gagal membaca file '{srt_file_path}': {e}")
-        sys.exit(1)
+    print(f"[DESCRIPTOR] [FATAL] Server lokal Qwen ({server_url}) tidak aktif dan GEMINI_API_KEY tidak ditemukan!")
+    print("  · Pastikan llama-server sedang berjalan di port 8080 atau sediakan GEMINI_API_KEY.")
+    sys.exit(1)
 
-    # Schema Pydantic
-    class Program(BaseModel):
-        program: str
-        announcer: str
-        timestamp: str
-        topic: str
-        description: str
 
-    class SiaranRadio(BaseModel):
-        title: str
-        description: str
-        programs: List[Program]
+def main():
+    parser = argparse.ArgumentParser(description="Voice of Trisma Description Generator.")
+    parser.add_argument("srt_path", help="Path ke berkas SRT atau transkrip teks.")
+    parser.add_argument("-o", "--output", default="transcripts/description.json",
+                        help="Path berkas output description.json (default: transcripts/description.json)")
+    parser.add_argument("-s", "--server-url", default=DEFAULT_SERVER_URL,
+                        help=f"URL server LLM OpenAI-compatible (default: {DEFAULT_SERVER_URL})")
+    parser.add_argument("-m", "--model", default=None,
+                        help="Model override (untuk fallback Gemini)")
 
-    sys_instruct = """
-    
-    ATURAN MUTLAK PENGGUNAAN TRANSKRIP & KOREKSI TYPO:
-1. SUMBER FAKTA TUNGGAL: Anda DILARANG KERAS menggunakan pengetahuan eksternal atau mengarang informasi (seperti kota, frekuensi radio, tahun berdiri, dll). Anda HANYA boleh merangkum fakta, nama, tempat, dan topik yang ada di dalam transkrip.
-2. KONTEKS JANGKAR (ANCHOR): Ketahuilah bahwa transkrip ini berasal dari stasiun radio sekolah bernama "Voice of Trisma" (atau VOT Radio), yang merupakan milik SMA Negeri 3 Denpasar, Bali. 
-3. TOLERANSI TYPO (KOREKSI FONETIK): Transkrip ini dihasilkan oleh mesin (Speech-to-Text), sehingga pasti banyak kata yang salah dengar (typo). Anda WAJIB memperbaiki ejaan kata yang terdengar aneh berdasarkan konteks dan bunyi fonetiknya, TANPA merubah fakta.
-   - Contoh Koreksi Benar: Jika tertulis "Fois of trisma" atau "Voice of karisma", perbaiki menjadi "Voice of Trisma".
-   - Contoh Koreksi Benar: Jika tertulis "SMA negeri tiga dan pasar", perbaiki menjadi "SMA Negeri 3 Denpasar".
-   - Contoh Koreksi Benar: Jika tertulis "lagu dari bi ti es", perbaiki menjadi "lagu dari BTS".
-   - Contoh Koreksi Salah (DILARANG): Jika transkrip tidak menyebutkan frekuensi, lalu Anda menambahkan "mengudara di 106.3 FM" (Ini halusinasi).
-4. NAMA ORANG: Jika ada nama penyiar atau narasumber yang ejaannya terdengar aneh (misal: "bersama saya Kadek dan Eka"), tulis saja ejaan yang paling masuk akal dalam bahasa Indonesia/Bali tanpa perlu memikirkan ejaan pastinya.
-    
-    PERSONALITAS DAN PERAN:
-Anda adalah arsiparis digital untuk siaran radio. Tugas Anda adalah membaca
-transkrip SRT dari rekaman siaran, lalu mengekstraknya menjadi JSON metadata
-yang komprehensif dan terstruktur.
-
-FORMAT JUDUL:
-Deteksi nama program siaran dan tanggal siaran secara otomatis dari isi transkrip.
-Format: <Nama Siaran> Edisi: <DD MMMM YYYY>
-Nama siaran diambil dari konten transkrip, bukan diasumsikan atau dikarang.
-Jika nama siaran tidak disebutkan secara eksplisit, gunakan nama paling relevan
-berdasarkan konteks. Contoh pola (bukan nilai tetap):
-  "Voice of Trisma Edisi: 07 Maret 2026"
-  "Radio Kampus XYZ Edisi: 15 April 2025"
-
-ATURAN KONSOLIDASI PROGRAM (WAJIB DIPATUHI):
-PRINSIP UTAMA:
-Setiap nama program siaran HANYA boleh muncul SATU KALI di dalam array 'programs',
-tidak peduli seberapa banyak sub-topik, konten, atau jeda yang ada di dalamnya.
-
-CARA MENENTUKAN BATAS PROGRAM BARU:
-[OK] Program BARU dimulai jika: nama segmen berubah ATAU penyiar secara eksplisit
-  menutup satu program dan membuka program lain yang berbeda nama.
-[LARANGAN] Jeda musik, pergantian sub-topik, atau selang waktu di tengah segmen BUKAN
-  pertanda program baru, itu masih bagian dari program yang sama.
-[LARANGAN] DILARANG membuat dua objek dengan nama 'program' yang identik.
-[LARANGAN] DILARANG memecah satu program hanya karena isinya banyak atau topiknya beragam.
-  Seluruh konten wajib digabung ke SATU objek.
-
-CARA MENGGABUNGKAN KONTEN:
-- Field 'timestamp'   : waktu PERTAMA kali program tersebut dibuka.
-- Field 'topic'       : rangkuman singkat dari seluruh sub-topik yang dibahas.
-- Field 'description' : memuat SEMUA detail tanpa terkecuali, setiap judul karya,
-  nama entitas, poin informasi yang ada di transkrip untuk segmen itu.
-
-CONTOH POLA (menggunakan nama program generik):
-  SALAH : [{program: "Program A", topic: "Bagian 1"},
-            {program: "Program A", topic: "Bagian 2"}]
-  BENAR : [{program: "Program A", topic: "Bagian 1 dan Bagian 2",
-            description: "... semua konten dari Bagian 1 dan Bagian 2 ..."}]
-
-LOGIKA IDENTIFIKASI PENYIAR & TIMESTAMP:
-1. Identifikasi Retrospektif:
-   Jika penyiar belum menyebutkan namanya di awal segmen, pindai seluruh percakapan
-   dalam segmen tersebut hingga nama ditemukan. Gunakan nama yang teridentifikasi.
-   JANGAN isi 'Tidak Disebutkan' selama nama masih bisa dipastikan dari konteks.
-
-2. Penentuan Timestamp Mulai:
-   Ambil timestamp tepat saat penyiar pertama kali menyapa pendengar atau membuka
-   segmen secara verbal. Jika penyiar langsung berbicara tanpa intro pembuka,
-   gunakan timestamp baris pertama segmen tersebut.
-   Catatan: beberapa penyiar mungkin memiliki pola pembuka yang konsisten antar
-   episode (misalnya selalu membuka di rentang waktu yang sama). Gunakan pola itu
-   sebagai petunjuk, namun tetap prioritaskan deteksi dari isi transkrip.
-
-3. Persistensi Nama:
-   Sekali penyiar teridentifikasi dalam satu segmen, nama itu berlaku untuk seluruh
-   durasi segmen tersebut, meskipun ada jeda atau pergantian sub-topik.
-
-GAYA PENULISAN (field 'description' level atas / root):
-Tulis 1-2 kalimat sinopsis naratif yang RINGKAS, HANGAT, dan MENGALIR,
-seperti keterangan episode di platform podcast atau streaming, bukan laporan.
-
-ATURAN GAYA:
-[OK] Gunakan sudut pandang 'insider' siaran. Sesuaikan frasa pembuka dengan nama
-  siaran yang terdeteksi dari transkrip. Contoh pola:
-  -> "[Nama Siaran] edisi [tanggal] hadir menemani dengan ..."
-  -> "Perjalanan siaran kali ini dibuka dengan ... sebelum berlanjut ke ..."
-  -> "... sebelum akhirnya ditutup dengan ..."
-[OK] Ceritakan alur TRANSISI antar segmen secara natural, pembaca harus merasakan
-  perjalanan siaran dari awal hingga akhir.
-[OK] Variasi konten (musik, info, ulasan, dll.) cukup untuk membangun daya tarik.
-[LARANGAN] "Siaran ini didominasi oleh...", "Program ini terdiri dari...",
-  atau kalimat kaku bergaya laporan penelitian.
-[LARANGAN] Ajakan langsung seperti "Mari dengarkan" atau "Yuk simak".
-
-CONTOH POLA OUTPUT (nama siaran menyesuaikan transkrip, ini hanya ilustrasi):
-"[Nama Siaran] edisi [tanggal] hadir menemani dengan [gambaran segmen pertama].
-Perjalanan siaran berlanjut dengan [segmen berikutnya], sebelum akhirnya ditutup
-oleh [segmen penutup]."
-
-DESKRIPSI SEGMEN (field 'description' di dalam programs):
-- Padat namun lengkap, cantumkan SEMUA entitas utama dari transkrip segmen itu:
-  judul karya, nama orang, poin informasi penting.
-- Ubah gaya bicara lisan menjadi narasi tertulis yang elegan.
-
-KONTROL KUALITAS UMUM:
-- Gunakan Bahasa Indonesia baku (EYD), lugas, dan hidup.
-- DILARANG menambahkan detail yang tidak ada di transkrip (tidak boleh mengarang
-  genre, tahun rilis, atau fakta eksternal lainnya).
-- DILARANG menghilangkan entitas apapun yang disebutkan di dalam transkrip."""
-
-    print(f"Sedang memproses transkrip ({len(transcript_content)} karakter)...")
-
-    gen_config = types.GenerateContentConfig(
-        system_instruction=sys_instruct,
-        response_mime_type="application/json",
-        response_schema=SiaranRadio,
-        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-    )
-
-    candidate_models = get_high_performance_flash_models(client, preferred_model=model_arg)
-    output_file_path = resolve_output_path(output_arg)
-    success = False
-
-    for model_name in candidate_models:
-        print(f"\n[INFO] Mencoba model high-performance: {model_name}")
-        for attempt in range(1, max_retries + 1):
-            try:
-                print(f"[{model_name}] Mengirim request ke Gemini API (Percobaan {attempt}/{max_retries})...")
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=f"Ekstrak data siaran dari transkrip SRT ini:\n\n{transcript_content}",
-                    config=gen_config,
-                )
-
-                if not response or not response.parsed:
-                    raise ValueError("Respons dari Gemini kosong atau gagal di-parse sesuai skema.")
-
-                output_data = response.parsed.model_dump()
-
-                with open(output_file_path, 'w', encoding='utf-8') as f:
-                    json.dump(output_data, f, indent=2, ensure_ascii=False)
-
-                print(f"\n[BERHASIL] Deskripsi berhasil diekstrak menggunakan model {model_name}!")
-                print(f"File JSON telah disimpan di: {output_file_path}")
-                success = True
-                break
-
-            except Exception as e:
-                print(f"[{model_name}] Terjadi kesalahan pada percobaan {attempt}/{max_retries}: {e}")
-                if is_transient_error(e) and attempt < max_retries:
-                    delay = initial_delay * (2 ** (attempt - 1))
-                    print(f"[RETRY] Server sibuk/high demand. Menunggu {delay:.1f} detik sebelum mencoba ulang...")
-                    time.sleep(delay)
-                else:
-                    if attempt >= max_retries:
-                        print(f"[{model_name}] Batas maksimal percobaan ({max_retries}x) telah tercapai.")
-                    break
-
-        if success:
-            break
-        else:
-            print(f"[WARNING] Model '{model_name}' gagal. Mencoba fallback ke model high-performance berikutnya...")
-
-    if not success:
-        print("\n[FATAL ERROR] Semua model high-performance dan percobaan retry gagal menghasilkan deskripsi.")
-        sys.exit(1)
+    args, _ = parser.parse_known_args()
+    generate_description(args.srt_path, args.output, server_url=args.server_url, model_arg=args.model)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Generate description JSON from SRT transcript with retry & high-performance fallback.",
-        formatter_class=argparse.RawTextHelpFormatter
-    )
-    parser.add_argument(
-        "srt_path",
-        help="Path ke file SRT transkrip"
-    )
-    parser.add_argument(
-        "-o", "--output",
-        default="output.json",
-        help=(
-            "Path file output JSON.\n"
-            "Contoh: -o transcripts/description.json\n"
-            "Folder induk akan dibuat otomatis jika belum ada.\n"
-            "Default: output.json (di folder saat ini)"
-        )
-    )
-    parser.add_argument(
-        "-m", "--model",
-        default=None,
-        help=(
-            "Model Gemini spesifik yang diprioritaskan.\n"
-            "Jika tidak ditentukan, sistem otomatis memilih model high-performance (>= 2.5) terbaru."
-        )
-    )
-    parser.add_argument(
-        "--max-retries",
-        type=int,
-        default=4,
-        help="Jumlah maksimal percobaan ulang (retry) per model saat terjadi 503/429 (default: 4)"
-    )
-    parser.add_argument(
-        "--retry-delay",
-        type=float,
-        default=5.0,
-        help="Waktu tunggu dasar dalam detik untuk exponential backoff retry (default: 5.0)"
-    )
-
-    args = parser.parse_args()
-    generate_description(
-        args.srt_path,
-        args.output,
-        model_arg=args.model,
-        max_retries=args.max_retries,
-        initial_delay=args.retry_delay
-    )
+    main()

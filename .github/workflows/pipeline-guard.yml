@@ -42,10 +42,14 @@ on:
           - small
           - base
           - tiny
-      gemini_model:
-        description: "Model Gemini override (kosongkan untuk deteksi otomatis >= 2.5)"
+      qwen_quant:
+        description: "Kuantisasi model Qwen3.6-35B-A3B untuk deskripsi"
         required: false
-        default: ""
+        default: "Q6_K"
+        type: choice
+        options:
+          - Q6_K
+          - Q4_K_M
 
 permissions:
   contents: read
@@ -60,8 +64,10 @@ jobs:
     name: 🔍 Scan Archive Recordings
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.scan.outputs.matrix }}
-      has_items: ${{ steps.scan.outputs.has_items }}
+      transcribe_matrix: ${{ steps.scan.outputs.transcribe_matrix }}
+      describe_matrix: ${{ steps.scan.outputs.describe_matrix }}
+      has_transcribe: ${{ steps.scan.outputs.has_transcribe }}
+      has_describe: ${{ steps.scan.outputs.has_describe }}
       count: ${{ steps.scan.outputs.count }}
 
     steps:
@@ -112,16 +118,16 @@ jobs:
             $ITEM_ARG \
             --export-github-output
 
-  process:
-    name: "🛡️ ${{ matrix.action == 'transcribe_and_describe' && '🎙️ Transcribe' || '📝 Describe' }}: ${{ matrix.item_id }}"
+  transcribe:
+    name: "🎙️ Transcribe: ${{ matrix.item_id }}"
     needs: scan
-    if: needs.scan.outputs.has_items == 'true'
+    if: needs.scan.outputs.has_transcribe == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      max-parallel: 10
+      max-parallel: 5
       matrix:
-        include: ${{ fromJson(needs.scan.outputs.matrix) }}
+        include: ${{ fromJson(needs.scan.outputs.transcribe_matrix) }}
 
     steps:
       - name: Checkout Repository
@@ -132,13 +138,12 @@ jobs:
         with:
           python-version: "3.x"
 
-      # ── Kasus A: Transkripsi & Deskripsi Lengkap ───────────────────────────
       - name: Setup Transcription Environment
-        if: matrix.action == 'transcribe_and_describe'
+        if: matrix.action != 'skip'
         run: python main/setup.py transcript
 
       - name: Transcribe Audio
-        if: matrix.action == 'transcribe_and_describe'
+        if: matrix.action != 'skip'
         env:
           ITEM_ID: ${{ matrix.item_id }}
           AUDIO_URL: ${{ matrix.audio_url }}
@@ -151,24 +156,17 @@ jobs:
           echo "[ INFO ] Transcribing $ITEM_ID dari $AUDIO_URL menggunakan model: $MODEL..."
           python3 -u main/transcribe.py "$AUDIO_URL" "$MODEL"
 
-      - name: Generate Description from SRT
-        if: matrix.action == 'transcribe_and_describe'
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ inputs.gemini_model }}
-        run: |
-          SRT_FILE="transcripts/transcript.srt"
-          if [ ! -f "$SRT_FILE" ] && [ -f "transcripts/transcript.txt" ]; then
-            SRT_FILE="transcripts/transcript.txt"
-          fi
-          MODEL_ARG=""
-          if [ -n "$GEMINI_MODEL" ]; then
-            MODEL_ARG="-m $GEMINI_MODEL"
-          fi
-          python main/descriptor.py "$SRT_FILE" -o transcripts/description.json $MODEL_ARG
+      - name: Upload Transcript Artifact
+        if: always() && matrix.action != 'skip'
+        uses: actions/upload-artifact@v4
+        with:
+          name: guard-transcript-${{ matrix.item_id }}
+          path: transcripts/
+          if-no-files-found: ignore
+          retention-days: 7
 
-      - name: Upload Transcript & Description to Archive.org
-        if: matrix.action == 'transcribe_and_describe'
+      - name: Push Transcript to Archive.org
+        if: matrix.action != 'skip'
         env:
           IA_ACCESS_KEY: ${{ secrets.IA_ACCESS_KEY }}
           IA_SECRET_KEY: ${{ secrets.IA_SECRET_KEY }}
@@ -176,51 +174,144 @@ jobs:
         run: |
           python3 -u main/archive.py
 
-      # ── Kasus B: Patch Description Saja ───────────────────────────────────
-      - name: Setup Description Environment
-        if: matrix.action == 'describe_only'
-        run: python main/setup.py guard
-
-      - name: Generate & Upload Description Only
-        if: matrix.action == 'describe_only'
-        env:
-          IA_ACCESS_KEY: ${{ secrets.IA_ACCESS_KEY }}
-          IA_SECRET_KEY: ${{ secrets.IA_SECRET_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          ITEM_ID: ${{ matrix.item_id }}
-          SRT_URL: ${{ matrix.srt_url }}
-          GEMINI_MODEL: ${{ inputs.gemini_model }}
-        run: |
-          SRT_ARG=""
-          if [ -n "$SRT_URL" ]; then
-            SRT_ARG="--srt-url $SRT_URL"
-          fi
-          MODEL_ARG=""
-          if [ -n "$GEMINI_MODEL" ]; then
-            MODEL_ARG="--model $GEMINI_MODEL"
-          fi
-          python3 -u main/guard.py fix-description \
-            --item-id "$ITEM_ID" \
-            $SRT_ARG \
-            $MODEL_ARG
-
-      # ── Log Summary ke GitHub Actions Step Summary ─────────────────────────
       - name: Log Step Summary
         if: always() && matrix.action != 'skip'
         env:
           ITEM_ID: ${{ matrix.item_id }}
-          ACTION: ${{ matrix.action }}
         run: |
-          echo "### 🛡️ Pipeline Guard: $ITEM_ID" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Aksi**: \`$ACTION\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 🎙️ Pipeline Guard Transcribe: $ITEM_ID" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Tautan Arsip**: [https://archive.org/details/$ITEM_ID](https://archive.org/details/$ITEM_ID)" >> "$GITHUB_STEP_SUMMARY"
 
-      # ── Artifact Backup ───────────────────────────────────────────────────
-      - name: Upload Transcripts Artifact
+  describe:
+    name: "🧠 Describe: ${{ matrix.item_id }}"
+    needs: [scan, transcribe]
+    if: always() && needs.scan.outputs.has_describe == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        include: ${{ fromJson(needs.scan.outputs.describe_matrix) }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install System Dependencies
+        if: matrix.action != 'skip'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq aria2 internetarchive
+
+      - name: Configure 32GB Swap
+        if: matrix.action != 'skip'
+        run: |
+          echo "=== Membersihkan Ruang Disk Runner ==="
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift 2>/dev/null || true
+          df -h /
+          echo "Mengalokasikan 32GB swapfile..."
+          sudo fallocate -l 32G /swapfile_extra || sudo dd if=/dev/zero of=/swapfile_extra bs=1M count=32768
+          sudo chmod 600 /swapfile_extra
+          sudo mkswap /swapfile_extra
+          sudo swapon /swapfile_extra
+          free -h
+
+      - name: Download Qwen3.6-35B GGUF Model with aria2c
+        if: matrix.action != 'skip'
+        env:
+          QUANT: ${{ inputs.qwen_quant || 'Q6_K' }}
+        run: |
+          mkdir -p "$HOME/qwen"
+          QUANT_VAL="${QUANT:-Q6_K}"
+          MODEL_URL="https://huggingface.co/hesamation/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-GGUF/resolve/main/Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled.${QUANT_VAL}.gguf"
+          MODEL_FILE="Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled.${QUANT_VAL}.gguf"
+          echo "[ INFO ] Mengunduh model Qwen 35B $QUANT_VAL via aria2c..."
+          aria2c -x 16 -s 16 -k 1M --file-allocation=none \
+            --allow-overwrite=true --auto-file-renaming=false \
+            -d "$HOME/qwen" -o "$MODEL_FILE" "$MODEL_URL"
+          echo "MODEL_PATH=$HOME/qwen/$MODEL_FILE" >> $GITHUB_ENV
+
+      - name: Download Existing Transcript from Archive.org
+        if: matrix.action != 'skip'
+        env:
+          ITEM_ID: ${{ matrix.item_id }}
+          SRT_URL: ${{ matrix.srt_url }}
+        run: |
+          mkdir -p transcripts
+          python3 -c "
+          from pathlib import Path
+          from main.core.downloader import download_archive_file
+          import os, sys
+          item = os.environ['ITEM_ID']
+          url = os.environ.get('SRT_URL') or f'https://archive.org/download/{item}/transcript.srt'
+          dest = Path('transcripts/transcript.srt')
+          if not download_archive_file(url, dest, is_text=True):
+              sys.exit(1)
+          "
+
+      - name: Start Llama Server
+        if: matrix.action != 'skip'
+        run: |
+          chmod +x bin/linux-x64/llama-server
+          nohup ./bin/linux-x64/llama-server \
+            -m "$MODEL_PATH" \
+            -c 32768 \
+            -b 512 \
+            -ub 256 \
+            -t $(nproc) \
+            --jinja \
+            --port 8080 > server.log 2>&1 &
+          READY=0
+          for i in $(seq 1 120); do
+            if curl -s http://127.0.0.1:8080/health | grep -qi "ok\|ready\|status"; then
+              echo "[ OK ] llama-server siap merespons!"
+              READY=1
+              break
+            fi
+            sleep 5
+          done
+          if [ $READY -eq 0 ]; then
+            echo "[ ERROR ] llama-server gagal siap!"
+            cat server.log
+            exit 1
+          fi
+
+      - name: Generate Description from SRT
+        if: matrix.action != 'skip'
+        run: |
+          echo "[ INFO ] Membersihkan transkrip dengan clean.py..."
+          python3 main/clean.py transcripts/transcript.srt > clean.txt
+          echo "[ INFO ] Menghasilkan description.json via Qwen LLM..."
+          python3 -u main/ask.py main/prompt.txt clean.txt transcripts/description.json http://127.0.0.1:8080/v1/chat/completions
+          cat transcripts/description.json
+
+      - name: Upload Description Artifact
         if: always() && matrix.action != 'skip'
         uses: actions/upload-artifact@v4
         with:
-          name: guard-${{ matrix.item_id }}
-          path: transcripts/
+          name: guard-description-${{ matrix.item_id }}
+          path: transcripts/description.json
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Push Description to Archive.org
+        if: matrix.action != 'skip'
+        env:
+          IA_ACCESS_KEY: ${{ secrets.IA_ACCESS_KEY }}
+          IA_SECRET_KEY: ${{ secrets.IA_SECRET_KEY }}
+          ITEM_ID: ${{ matrix.item_id }}
+        run: |
+          python3 -u main/archive.py
+
+      - name: Log Step Summary
+        if: always() && matrix.action != 'skip'
+        env:
+          ITEM_ID: ${{ matrix.item_id }}
+        run: |
+          echo "### 🛡️ Pipeline Guard (Describe): $ITEM_ID" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Model**: \`Qwen3.6-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Tautan Arsip**: [https://archive.org/details/$ITEM_ID](https://archive.org/details/$ITEM_ID)" >> "$GITHUB_STEP_SUMMARY"

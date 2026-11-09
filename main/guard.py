@@ -346,22 +346,37 @@ def generate_github_step_summary(tasks: List[Dict], stats: Optional[Dict] = None
 def export_github_outputs(tasks: List[Dict], stats: Optional[Dict] = None):
     """
     Ekspor matriks dan status ke GITHUB_OUTPUT.
-    Menghindari error runner 'matrix must evaluate to at least one job'
-    dengan menyuplai dummy task yang diskip jika tasks kosong.
+    Memisahkan task transcribe dan describe agar dapat dieksekusi di instance runner terpisah.
     """
     github_output = os.environ.get("GITHUB_OUTPUT")
     has_items = bool(tasks)
 
-    # Safety wrapper: jika tasks kosong, berikan list dummy agar include: ${{ fromJson(...) }} tidak crash
-    safe_matrix = tasks if has_items else [{"item_id": "skip", "action": "skip", "audio_url": "", "srt_url": ""}]
+    # Pisahkan task berdasarkan kebutuhan
+    transcribe_tasks = [t for t in tasks if t.get("action") in ("transcribe_and_describe", "transcribe_only")]
+    describe_tasks = [t for t in tasks if t.get("action") == "describe_only"]
+
+    safe_dummy = [{"item_id": "skip", "action": "skip", "audio_url": "", "srt_url": ""}]
+    safe_matrix = tasks if has_items else safe_dummy
+    safe_transcribe = transcribe_tasks if transcribe_tasks else safe_dummy
+    safe_describe = describe_tasks if describe_tasks else safe_dummy
+
     matrix_json = json.dumps(safe_matrix)
+    trans_json = json.dumps(safe_transcribe)
+    desc_json = json.dumps(safe_describe)
+
+    has_trans = bool(transcribe_tasks)
+    has_desc = bool(describe_tasks)
 
     if github_output:
         with open(github_output, "a", encoding="utf-8") as f:
             f.write(f"matrix={matrix_json}\n")
+            f.write(f"transcribe_matrix={trans_json}\n")
+            f.write(f"describe_matrix={desc_json}\n")
             f.write(f"count={len(tasks)}\n")
             f.write(f"has_items={'true' if has_items else 'false'}\n")
-        log("Berhasil mengekspor output ke GITHUB_OUTPUT.")
+            f.write(f"has_transcribe={'true' if has_trans else 'false'}\n")
+            f.write(f"has_describe={'true' if has_desc else 'false'}\n")
+        log(f"Berhasil mengekspor output ke GITHUB_OUTPUT (Transcribe: {len(transcribe_tasks)}, Describe: {len(describe_tasks)}).")
     else:
         log("GITHUB_OUTPUT tidak terdeteksi, mencetak JSON matriks:")
         print(matrix_json)
