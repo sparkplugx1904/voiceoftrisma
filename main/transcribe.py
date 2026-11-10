@@ -62,7 +62,23 @@ MODEL_ALIASES = {
     "turbo": "large-v3-turbo",
 }
 DEFAULT_MODEL_NAME = "large-v3-turbo"
-DEFAULT_PROMPT = "Voice of Trisma, Madyapadma, Sobat Trisma."
+
+
+def load_whisper_prompt() -> str:
+    """Memuat initial prompt dari main/whisper.txt jika tersedia."""
+    prompt_file = Path(__file__).resolve().parent / "whisper.txt"
+    if prompt_file.exists():
+        try:
+            content = prompt_file.read_text(encoding="utf-8").strip()
+            if content:
+                lines = [line.strip() for line in content.splitlines() if line.strip() and not line.strip().startswith("#")]
+                return " ".join(lines)
+        except Exception as e:
+            log_warn(f"Gagal membaca whisper.txt: {e}. Menggunakan fallback default prompt.")
+    return "Voice of Trisma, Madyapadma, Sobat Trisma."
+
+
+DEFAULT_PROMPT = load_whisper_prompt()
 # --------------------
 
 # --- Fungsi Inti ---
@@ -340,8 +356,10 @@ def preprocess_audio(input_path: Path, ffmpeg_bin: Path) -> Path:
         log_warn(f"Error saat pra-pemrosesan FFmpeg: {e}. Menggunakan audio asli.")
         return input_path
 
-def transcribe_single_audio(audio_path: Path, model_path: Path, whisper_cli_path: Path, ffmpeg_bin: Path, prompt: str = DEFAULT_PROMPT):
+def transcribe_single_audio(audio_path: Path, model_path: Path, whisper_cli_path: Path, ffmpeg_bin: Path, prompt: Optional[str] = None):
     """Mentranskripsi seluruh file audio tunggal menggunakan whisper.cpp CLI."""
+    if not prompt:
+        prompt = DEFAULT_PROMPT or load_whisper_prompt()
     os.makedirs("transcripts", exist_ok=True)
     
     final_txt = Path("transcripts/transcript.txt")
@@ -366,6 +384,7 @@ def transcribe_single_audio(audio_path: Path, model_path: Path, whisper_cli_path
     clean_audio_path = preprocess_audio(audio_path, ffmpeg_bin)
     
     log_info(f"Mentranskripsi: {clean_audio_path.name}")
+    log_info(f"Prompt Whisper: '{prompt}'")
     n_threads = str(min(8, os.cpu_count() or 4))
         
     cmd = [
