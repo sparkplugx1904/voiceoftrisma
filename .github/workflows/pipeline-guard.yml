@@ -188,8 +188,8 @@ jobs:
 
   describe:
     name: "🧠 Describe: ${{ matrix.item_id }}"
-    needs: [scan, transcribe]
-    if: always() && needs.scan.outputs.has_describe == 'true'
+    needs: scan
+    if: needs.scan.outputs.has_describe == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
