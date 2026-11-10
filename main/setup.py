@@ -20,6 +20,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 
 GH_BASE = "https://github.com/sparkplugx1904/voiceoftrisma/raw/refs/heads/main"
@@ -108,6 +109,171 @@ def run(args: list[str], **kwargs):
     subprocess.check_call(args, **kwargs)
 
 
+def is_real_binary(path: str | Path, min_size: int = 1000) -> bool:
+    """Periksa apakah file ada, bukan file kosong, dan bukan Git LFS pointer text (anti Errno 8)."""
+    p = Path(path)
+    if not p.is_file() or p.stat().st_size < min_size:
+        return False
+    try:
+        with open(p, "rb") as f:
+            header = f.read(16)
+            if header.startswith(b"version https://"):
+                return False
+    except Exception:
+        return False
+    return True
+
+
+def install_ffmpeg_apt_fallback(max_retries: int = 2, timeout: int = 120) -> bool:
+    """Fallback instalasi FFmpeg via apt jika static binary tidak tersedia, dengan safe dpkg lock handling."""
+    try:
+        subprocess.run(["sudo", "systemctl", "stop", "unattended-upgrades", "apt-daily.timer", "apt-daily-upgrade.timer"], check=False)
+        subprocess.run(["sudo", "killall", "-9", "apt", "apt-get"], check=False)
+        subprocess.run(["sudo", "rm", "-f", "/var/lib/apt/lists/lock", "/var/lib/dpkg/lock-frontend", "/var/lib/dpkg/lock"], check=False)
+        subprocess.run(["sudo", "dpkg", "--configure", "-a"], check=False)
+    except Exception:
+        pass
+
+    for attempt in range(1, max_retries + 1):
+        print(f"  ·  apt-get install ffmpeg attempt {attempt}/{max_retries} ...")
+        try:
+            subprocess.run(["sudo", "apt-get", "update", "-qq"], timeout=timeout, check=False)
+            subprocess.run(["sudo", "apt-get", "install", "-y", "--no-install-recommends", "ffmpeg"], timeout=timeout, check=True)
+            if shutil.which("ffmpeg"):
+                print("  ✓  ffmpeg berhasil dipasang via apt-get")
+                return True
+        except Exception as exc:
+            print(f"  ⚠  apt-get install ffmpeg attempt {attempt} gagal: {exc}")
+
+        if attempt < max_retries:
+            time.sleep(3)
+
+    return False
+
+
+def ensure_ffmpeg() -> bool:
+    """
+    Pastikan biner static FFmpeg & FFprobe dari repositori tersedia dan tertambat ke OS PATH.
+    Mendukung Linux & Windows, instan, kebal error dpkg lock dan tidak bergantung pada apt-get.
+    """
+    print("  ·  Memeriksa dependensi FFmpeg & FFprobe...")
+
+    # 1. Cek apakah ffmpeg sudah tersedia di PATH sistem dan merupakan binary valid
+    existing_ffmpeg = shutil.which("ffmpeg")
+    if existing_ffmpeg and is_real_binary(existing_ffmpeg):
+        print(f"  ✓  ffmpeg sudah tersedia di OS PATH: {existing_ffmpeg}")
+        return True
+
+    # 2. Cari static binary di repositori
+    if os.name == "nt":
+        candidates_ffmpeg = [
+            Path("bin/win-x64/ffmpeg.exe"),
+            Path("bin/ffmpeg.exe"),
+            Path("ffmpeg.exe"),
+        ]
+        candidates_ffprobe = [
+            Path("bin/win-x64/ffprobe.exe"),
+            Path("bin/ffprobe.exe"),
+            Path("ffprobe.exe"),
+        ]
+        platform_dir = "bin/win-x64"
+        ext = ".exe"
+    else:
+        candidates_ffmpeg = [
+            Path("bin/linux-x64/ffmpeg"),
+            Path("bin/ffmpeg"),
+            Path("ffmpeg"),
+        ]
+        candidates_ffprobe = [
+            Path("bin/linux-x64/ffprobe"),
+            Path("bin/ffprobe"),
+            Path("ffprobe"),
+        ]
+        platform_dir = "bin/linux-x64"
+        ext = ""
+
+    ffmpeg_src = next((c for c in candidates_ffmpeg if is_real_binary(c)), None)
+    ffprobe_src = next((c for c in candidates_ffprobe if is_real_binary(c)), None)
+
+    # 3. Jika file lokal tidak ada atau pointer LFS, unduh static binary mandiri dari repo
+    if not ffmpeg_src:
+        print("  ·  Static FFmpeg lokal tidak ditemukan atau pointer LFS, mengunduh biner mandiri...")
+        dest = f"ffmpeg{ext}"
+        try:
+            download(f"{GH_BASE}/{platform_dir}/ffmpeg{ext}", dest)
+            if is_real_binary(dest):
+                ffmpeg_src = Path(dest)
+        except Exception as exc:
+            print(f"  ⚠  Gagal mengunduh static ffmpeg: {exc}")
+
+    if not ffprobe_src:
+        dest = f"ffprobe{ext}"
+        try:
+            download(f"{GH_BASE}/{platform_dir}/ffprobe{ext}", dest)
+            if is_real_binary(dest):
+                ffprobe_src = Path(dest)
+        except Exception:
+            pass
+
+    # 4. Tambatkan (tether) static binary ke sistem OS
+    if ffmpeg_src and ffmpeg_src.exists():
+        # Berikan hak akses eksekusi
+        if os.name != "nt":
+            os.chmod(ffmpeg_src, os.stat(ffmpeg_src).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+            if ffprobe_src and ffprobe_src.exists():
+                os.chmod(ffprobe_src, os.stat(ffprobe_src).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+        # Di Linux/Unix: Pasang ke /usr/local/bin (level sistem OS untuk whisper.cpp, shell & python)
+        if os.name != "nt":
+            for tool_name, src_file in (("ffmpeg", ffmpeg_src), ("ffprobe", ffprobe_src)):
+                if not src_file or not src_file.exists():
+                    continue
+                dest_path = f"/usr/local/bin/{tool_name}"
+                try:
+                    subprocess.run(["sudo", "ln", "-sf", str(src_file.resolve()), dest_path], check=False)
+                    subprocess.run(["sudo", "chmod", "+x", dest_path], check=False)
+                except Exception as e:
+                    print(f"  ·  Info symlink {tool_name} ke {dest_path}: {e}")
+
+        # Pastikan juga ada ./ffmpeg di root CWD (untuk kompatibilitas record_v1 & record_v2)
+        local_target = Path(f"ffmpeg{ext}")
+        if ffmpeg_src.resolve() != local_target.resolve() and not local_target.exists():
+            try:
+                if os.name != "nt":
+                    os.symlink(ffmpeg_src.resolve(), local_target)
+                else:
+                    shutil.copy2(ffmpeg_src, local_target)
+            except Exception:
+                pass
+
+        # Tambahkan direktori biner ke PATH proses saat ini & GITHUB_PATH
+        bin_dir = str(ffmpeg_src.resolve().parent)
+        if bin_dir not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"
+
+        if "GITHUB_PATH" in os.environ:
+            try:
+                with open(os.environ["GITHUB_PATH"], "a", encoding="utf-8") as f:
+                    f.write(f"{bin_dir}\n")
+                    if os.name != "nt":
+                        f.write("/usr/local/bin\n")
+            except Exception:
+                pass
+
+        which_ffmpeg = shutil.which("ffmpeg")
+        if which_ffmpeg:
+            print(f"  ✓  Static FFmpeg berhasil ditambatkan ke OS PATH: {which_ffmpeg}")
+            return True
+
+    # 5. Fallback darurat ke apt-get jika static binary gagal total
+    if os.name != "nt" and shutil.which("apt-get"):
+        print("  ⚠  Static FFmpeg tidak berhasil ditambatkan, mencoba fallback apt-get...")
+        return install_ffmpeg_apt_fallback()
+
+    print("  ⚠  FFmpeg tidak berhasil ditambatkan.")
+    return False
+
+
 # ── record ─────────────────────────────────────────────────────────────────
 
 
@@ -115,26 +281,14 @@ def setup_record():
     """
     Setup untuk job "Record Stream and Upload".
 
-    Download ffmpeg & ffprobe, chmod +x, pip install requirements record.
+    Tambatkan FFmpeg & FFprobe (dari repo/download), chmod +x, pip install requirements record.
     Script rekaman (record_v1.py / record_v2.py)
     """
     print("\n── Setup record ──\n")
 
-    # ── Download ffmpeg & ffprobe ──
-    try:
-        download(f"{GH_BASE}/bin/linux-x64/ffmpeg", "ffmpeg")
-        download(f"{GH_BASE}/bin/linux-x64/ffprobe", "ffprobe")
-    except RuntimeError as exc:
-        print(f"\n❌  Record setup gagal: {exc}")
-        print("  ·  Job tidak bisa lanjut tanpa file-file ini.")
-        print("  ·  Coba: pastikan koneksi internet stabil, lalu jalankan ulang.\n")
+    if not ensure_ffmpeg():
+        print("\n❌  Record setup gagal: FFmpeg tidak tersedia.")
         sys.exit(1)
-
-    # ── chmod binaries ──
-    for bin_name in ("ffmpeg", "ffprobe"):
-        if os.path.exists(bin_name):
-            os.chmod(bin_name, os.stat(bin_name).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-            print(f"  ✓  chmod +x {bin_name}")
 
     # ── pip install (dari requirements/ di checkout repo) ──
     req = os.path.join(os.path.dirname(__file__), "..", "requirements", "record")
@@ -147,49 +301,6 @@ def setup_record():
         sys.exit(1)
 
     print("\n✓  Setup record selesai.\n")
-
-
-# ── ffmpeg installer (menggantikan 3x Setup FFmpeg di YAML) ────────────────
-
-
-def install_ffmpeg(max_retries: int = 3, timeout: int = 120):
-    """
-    Install FFmpeg via apt dengan retry & timeout handling.
-
-    Mirip behavior 3x FedericoCarboni/setup-ffmpeg@v3 + continue-on-error:
-      - Cek ffmpeg di PATH
-      - Install via apt-get
-      - Retry max_retries kali jika gagal/timeout
-      - Jika tetap gagal → warning + lanjut (tidak exit)
-    """
-    if shutil.which("ffmpeg"):
-        print("  ·  ffmpeg already available in PATH")
-        return True
-
-    for attempt in range(1, max_retries + 1):
-        print(f"  ·  ffmpeg install attempt {attempt}/{max_retries} ...")
-        try:
-            subprocess.run(
-                ["sudo", "apt-get", "update", "-qq"],
-                timeout=timeout, check=False, capture_output=True,
-            )
-            subprocess.run(
-                ["sudo", "apt-get", "install", "-y", "--no-install-recommends", "ffmpeg"],
-                timeout=timeout, check=True, capture_output=True,
-            )
-            if shutil.which("ffmpeg"):
-                print("  ✓  ffmpeg installed successfully")
-                return True
-        except subprocess.TimeoutExpired:
-            print(f"  ⚠  ffmpeg attempt {attempt} timed out (> {timeout}s)")
-        except subprocess.CalledProcessError as exc:
-            print(f"  ⚠  ffmpeg attempt {attempt} failed (exit {exc.returncode})")
-
-        if attempt < max_retries:
-            time.sleep(3)
-
-    print("  ⚠  ffmpeg installation failed after all retries — continuing anyway")
-    return False
 
 
 # ── transcript ─────────────────────────────────────────────────────────────
@@ -206,25 +317,22 @@ def setup_transcript():
     """
     Setup untuk job "Transcribe and Push to Archive".
 
-    Install FFmpeg (retry 3x, continue-on-error),
-    chmod +x binary Whisper-CPP di bin/,
-    pip install dependencies transkripsi,
-    sudo apt install -y internetarchive.
+    1. Tambatkan static FFmpeg dari repo ke OS PATH (/usr/local/bin & PATH)
+    2. chmod +x binary Whisper-CPP di bin/
+    3. pip install dependencies transkripsi
+    4. Install aria2 jika ada apt (opsional)
     """
     print("\n── Setup transcript ──\n")
 
-    # 1. FFmpeg (retry 3x, continue-on-error)
-    install_ffmpeg()
+    # 1. FFmpeg static binary tethering
+    ensure_ffmpeg()
 
     # 2. chmod +x semua binary Whisper-CPP di bin/
     for binfile in WHISPER_BINS:
-        dest = os.path.join("bin", "linux-x64", binfile)
-        if not os.path.exists(dest):
-            dest = os.path.join("bin", binfile)
-        if os.path.exists(dest):
-            os.chmod(dest, os.stat(dest).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-        else:
-            print(f"  ·  {dest} not found, skipping.")
+        for base_dir in ("bin/linux-x64", "bin"):
+            dest = os.path.join(base_dir, binfile)
+            if os.path.exists(dest) and os.name != "nt":
+                os.chmod(dest, os.stat(dest).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
     # 3. pip install dependencies untuk transkripsi
     req = os.path.join(os.path.dirname(__file__), "..", "requirements", "transcript")
@@ -233,13 +341,13 @@ def setup_transcript():
     else:
         print(f"  ·  {req} not found, skipping pip install.")
 
-    # 4. Install archive tool & aria2 (jika di Linux apt)
-    if os.name != "nt" and shutil.which("apt-get"):
+    # 4. Install aria2 (opsional, jika belum terpasang dan apt tersedia)
+    if os.name != "nt" and shutil.which("apt-get") and not shutil.which("aria2c"):
         try:
-            run(["sudo", "apt-get", "update", "-qq"])
-            run(["sudo", "apt-get", "install", "-y", "-qq", "internetarchive", "aria2"])
+            run(["sudo", "apt-get", "install", "-y", "-qq", "aria2"])
         except Exception as e:
-            print(f"  ·  Apt install error (ignored): {e}")
+            print(f"  ·  Apt aria2 install skipped: {e}")
+
     print("\n✓  Setup transcript selesai.\n")
 
 def setup_descript():
@@ -274,11 +382,10 @@ def setup_descript():
         deps = ["requests", "urllib3", "internetarchive", "python-dotenv", "google-genai", "pydantic"]
         run([sys.executable, "-m", "pip", "install", *deps])
 
-    # 3. Apt packages (aria2 untuk unduh model cepat & internetarchive CLI)
-    if os.name != "nt" and shutil.which("apt-get"):
+    # 3. Apt packages (aria2 untuk unduh model cepat, opsional jika belum ada)
+    if os.name != "nt" and shutil.which("apt-get") and not shutil.which("aria2c"):
         try:
-            run(["sudo", "apt-get", "update", "-qq"])
-            run(["sudo", "apt-get", "install", "-y", "-qq", "aria2", "internetarchive"])
+            run(["sudo", "apt-get", "install", "-y", "-qq", "aria2"])
         except Exception as e:
             print(f"  ·  Apt install error (ignored): {e}")
 
