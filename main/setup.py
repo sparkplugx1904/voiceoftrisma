@@ -385,9 +385,11 @@ def setup_descript():
     # 3. Apt packages (aria2 untuk unduh model cepat, opsional jika belum ada)
     if os.name != "nt" and shutil.which("apt-get") and not shutil.which("aria2c"):
         try:
+            subprocess.run(["sudo", "systemctl", "stop", "unattended-upgrades", "apt-daily.timer"], check=False)
+            subprocess.run(["sudo", "rm", "-f", "/var/lib/apt/lists/lock", "/var/lib/dpkg/lock-frontend", "/var/lib/dpkg/lock"], check=False)
             run(["sudo", "apt-get", "install", "-y", "-qq", "aria2"])
         except Exception as e:
-            print(f"  ·  Apt install error (ignored): {e}")
+            print(f"  ·  Apt aria2 install skipped: {e}")
 
     print("\n✓  Setup descript selesai.\n")
 
