@@ -1,0 +1,103 @@
+name: 🧪 Test NeMo-Speech.cpp Transcribe
+
+on:
+  workflow_dispatch:
+    inputs:
+      audio_source:
+        description: "Sumber audio siaran untuk pengujian"
+        required: true
+        default: "archive_recent"
+        type: choice
+        options:
+          - "archive_recent"
+          - "stream_live"
+          - "custom_url"
+          - "synthetic_sample"
+      audio_url:
+        description: "URL audio siaran kustom (hanya jika sumber = custom_url)"
+        required: false
+        default: ""
+        type: string
+      duration:
+        description: "Durasi potongan siaran yang diuji dalam detik (default: 60)"
+        required: false
+        default: "60"
+        type: string
+      start_offset:
+        description: "Offset awal potongan audio siaran (default: 00:03:00 untuk melewati jingle)"
+        required: false
+        default: "00:03:00"
+        type: string
+      model:
+        description: "Nama model Nemotron Speech (default: nemotron-3.5)"
+        required: false
+        default: "nemotron-3.5"
+        type: string
+      stream_mode:
+        description: "Gunakan mode streaming (--stream)"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  test-nemotron:
+    name: ⚡ Test Nemotron Speech ASR
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg curl jq cmake build-essential libasound2-dev libsndfile1-dev
+
+      - name: Install NeMo-Speech.cpp Runtime
+        run: |
+          echo "=== Mengunduh & Menginstal NeMo-Speech.cpp (CPU Backend) ==="
+          curl -fsSL https://github.com/NVIDIA/NeMo-Speech.cpp/raw/main/scripts/install.sh | sh -s -- --backend cpu
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/bin:$PATH"
+
+          echo "=== Verifikasi Biner nemo-speech ==="
+          if [ -f "$HOME/.local/bin/nemo-speech" ]; then
+            chmod +x "$HOME/.local/bin/nemo-speech"
+          fi
+          which nemo-speech || ls -la "$HOME/.local/bin" || true
+          nemo-speech --version || true
+          nemo-speech model list || true
+          nemo-speech help transcribe || true
+
+      - name: Run Nemotron Transcription Benchmark
+        env:
+          STREAM_URL: ${{ secrets.STREAM_URL }}
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          STREAM_FLAG=""
+          if [ "${{ inputs.stream_mode }}" = "true" ]; then
+            STREAM_FLAG="--stream"
+          fi
+
+          python3 -u main/test_nemotron.py \
+            --source "${{ inputs.audio_source }}" \
+            --url "${{ inputs.audio_url }}" \
+            --duration "${{ inputs.duration }}" \
+            --start-offset "${{ inputs.start_offset }}" \
+            --model "${{ inputs.model }}" \
+            $STREAM_FLAG \
+            --output-dir "transcripts"
+
+      - name: Upload Test Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nemo-speech-transcript-results
+          path: transcripts/
+          retention-days: 7

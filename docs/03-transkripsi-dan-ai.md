@@ -73,3 +73,23 @@ Gemini mengekstrak entitas penting dan menyimpannya dalam skema JSON terstruktur
 ```
 
 Berkas `description.json` inilah yang nantinya dibaca oleh website VOT untuk menampilkan informasi acara, nama penyiar, dan ringkasan isi rekaman kepada pendengar.
+
+---
+
+## 🧪 Workflow Eksperimental: NVIDIA NeMo-Speech.cpp (`test-nemotron.yml`)
+
+Untuk mengevaluasi alternatif engine transkripsi native selain Whisper.cpp, repositori menyediakan workflow pengujian khusus menggunakan [NeMo-Speech.cpp](https://github.com/NVIDIA/NeMo-Speech.cpp) dan script uji `main/test_nemotron.py`:
+
+```bash
+# Menjalankan uji lokal / dry-run
+python main/test_nemotron.py --source archive_recent --duration 60 --model nemotron-3.5
+```
+
+### Parameter Pengujian di GitHub Actions:
+- **`audio_source`**: Pilihan sumber audio (`archive_recent`, `stream_live`, `custom_url`, atau `synthetic_sample`).
+- **`duration`**: Durasi audio yang diuji dalam detik (default `60` detik agar cepat dan hemat CPU runner).
+- **`start_offset`**: Posisi offset awal pemotongan audio (default `00:03:00` untuk melewati musik pembuka siaran).
+- **`model`**: Model Nemotron Speech (default: `nemotron-3.5`).
+- **`stream_mode`**: Flag pengujian streaming decoding (`--stream`).
+
+Hasil pengujian (kecepatan inferensi, Real-Time Factor / RTF, cuplikan transkrip, dan berkas keluaran `.txt`/`.srt`/`.json`) otomatis dilaporkan pada **GitHub Step Summary** dan diunggah sebagai artifact workflow.
