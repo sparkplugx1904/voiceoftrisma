@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       limit:
-        description: "Jumlah rekaman maksimal yang diproses (kosong = otomatis: 10 transcribe, 5 describe)"
+        description: "Jumlah rekaman maksimal yang diproses (kosong = otomatis: 7 transcribe, 3 describe)"
         required: false
         default: ""
       max_scan:
@@ -66,6 +66,7 @@ concurrency:
 jobs:
   scan:
     name: 🔍 Scan Archive Recordings
+    if: false # Dinonaktifkan sementara untuk fokus retranskripsi arsip rusak via retranscribe.yml
     runs-on: ubuntu-latest
     outputs:
       transcribe_matrix: ${{ steps.scan.outputs.transcribe_matrix }}
@@ -101,17 +102,17 @@ jobs:
           MAX_SCAN="${INPUT_MAX_SCAN:-1000}"
 
           # Penentuan mode & limit:
-          # - transcribe: 10 worker paralel
-          # - describe: 5 worker paralel
+          # - transcribe: 7 worker paralel
+          # - describe: 3 worker paralel
           MODE="${INPUT_MODE:-auto}"
           if [ -n "$INPUT_LIMIT" ]; then
             LIMIT="$INPUT_LIMIT"
           elif [ "$MODE" = "transcribe_only" ]; then
-            LIMIT=10
+            LIMIT=7
           elif [ "$MODE" = "describe_only" ]; then
-            LIMIT=5
+            LIMIT=3
           else
-            LIMIT=15
+            LIMIT=10
           fi
           echo "Event: $EVENT_NAME | Mode: $MODE | Limit: $LIMIT | Max scan: $MAX_SCAN"
 
@@ -129,7 +130,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      max-parallel: 10
+      max-parallel: 7
       matrix:
         include: ${{ fromJson(needs.scan.outputs.transcribe_matrix) }}
 
@@ -193,7 +194,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      max-parallel: 5
+      max-parallel: 3
       matrix:
         include: ${{ fromJson(needs.scan.outputs.describe_matrix) }}
 

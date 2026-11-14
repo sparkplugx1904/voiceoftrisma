@@ -316,18 +316,17 @@ def download_audio(url: str, output_path: Path):
 def preprocess_audio(input_path: Path, ffmpeg_bin: Path) -> Path:
     """
     Membersihkan sinyal audio siaran radio sebelum ditranskripsi:
-    - Memangkas dead air di awal (silenceremove)
     - Memotong letupan nafas mic / plosive P-pop (highpass 80Hz)
     - Memotong desis elektrik tinggi / white noise seperti hujan (lowpass 7500Hz)
     - Meredam kebisingan latar studio (afftdn)
     - Menormalkan level vokal penyiar ke standar broadcast (loudnorm EBU R128)
     - Mengonversi format ke 16kHz Mono 16-bit WAV untuk whisper.cpp
+    (Catatan: JANGAN gunakan silenceremove agar timeline/durasi audio WAV tetap identik 1:1 dengan audio asli)
     """
     clean_wav = input_path.with_name(f"{input_path.stem}_clean.wav")
-    log_info(f"Pra-pemrosesan audio (filter desis, dead air & normalisasi loudness): {clean_wav.name}")
+    log_info(f"Pra-pemrosesan audio (filter desis & normalisasi loudness): {clean_wav.name}")
     
     filter_chain = (
-        "silenceremove=start_periods=1:start_duration=2:start_threshold=-40dB,"
         "highpass=f=80,"
         "lowpass=f=7500,"
         "afftdn=nf=-25,"
