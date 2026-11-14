@@ -1,9 +1,6 @@
 name: 🔄 Retranscribe Broken Archives
 
 on:
-  # schedule:
-  #   # Berjalan 6x sehari (tiap 4 jam: jam 00, 04, 08, 12, 16, 20 WITA = UTC 16, 20, 00, 04, 08, 12)
-  #   - cron: "0 0,4,8,12,16,20 * * *"
   workflow_dispatch:
     inputs:
       limit:
