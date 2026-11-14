@@ -33,7 +33,6 @@ concurrency:
 jobs:
   scan:
     name: "🔍 Scan & Queue Retranscription Batch"
-    if: false # Dinonaktifkan oleh pengguna
     runs-on: ubuntu-latest
     outputs:
       retranscribe_matrix: ${{ steps.scan.outputs.retranscribe_matrix }}
