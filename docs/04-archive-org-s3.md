@@ -73,3 +73,21 @@ python main/guard.py status --rows 10
 python main/guard.py fix-description --item-id vot-denpasar-20261027-183000
 ```
 Pipeline Guard memastikan katalog siaran VOT di website selalu memiliki data transkrip dan ringkasan yang utuh.
+
+---
+
+## 🗄️ Auto-Backup ke Hugging Face Dataset (`main/backup.py` & `auto-backup.yml`)
+
+Untuk replikasi data dan redundansi pengarsipan sekunder di luar Archive.org, sistem menyediakan pipeline pencadangan otomatis ke **Hugging Face Hub Dataset**:
+- **Dataset Tujuan**: [`Sparkplugx1904/voiceoftrisma`](https://huggingface.co/datasets/Sparkplugx1904/voiceoftrisma)
+- **Struktur Penyimpanan**: `records/{identifier}/*` (seluruh berkas: audio, transkrip SRT/TXT/JSON, deskripsi, SQLite, torrent, XML).
+- **Mekanisme**:
+  - Mengunduh berkas secara paralel per batch (default: 100 identifier).
+  - Mengunggah ke Hugging Face via `huggingface_hub` API per batch.
+  - Membersihkan ruang disk runner setelah setiap batch selesai.
+  - Bersifat idempoten (hanya mencadangkan identifier yang belum ada di Hugging Face).
+
+```bash
+# Menjalankan backup lokal / manual
+python main/backup.py --batch-size 100
+```

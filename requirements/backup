@@ -1,0 +1,3 @@
+# Dependensi untuk Auto-Backup Archive.org ke Hugging Face Hub Dataset
+huggingface_hub>=0.23.0
+urllib3

@@ -399,17 +399,34 @@ def setup_guard():
     setup_descript()
 
 
+def setup_backup():
+    """Setup untuk job auto-backup Archive.org ke Hugging Face Hub Dataset."""
+    print("\n── Setup backup ──\n")
+    req = os.path.join(os.path.dirname(__file__), "..", "requirements", "backup")
+    if not os.path.exists(req):
+        req = "requirements/backup"
+    if os.path.exists(req):
+        try:
+            run([sys.executable, "-m", "pip", "install", "-r", req])
+        except subprocess.CalledProcessError:
+            print(f"\n❌  pip install gagal untuk {req}.")
+            sys.exit(1)
+    else:
+        run([sys.executable, "-m", "pip", "install", "huggingface_hub>=0.23.0", "urllib3"])
+    print("\n✓  Setup backup selesai.\n")
+
+
 # ── CLI ────────────────────────────────────────────────────────────────────
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="VoT setup utility — install dependencies untuk recording, transkripsi, atau deskripsi.",
+        description="VoT setup utility — install dependencies untuk recording, transkripsi, deskripsi, atau backup.",
     )
     parser.add_argument(
         "mode",
-        choices=["record", "transcript", "descript", "describe", "hybrid", "guard"],
-        help="Mode: 'record', 'transcript', 'descript' (atau 'describe'), 'hybrid' (record+transcript), atau 'guard'",
+        choices=["record", "transcript", "descript", "describe", "hybrid", "guard", "backup"],
+        help="Mode: 'record', 'transcript', 'descript', 'hybrid', 'guard', atau 'backup'",
     )
 
     args = parser.parse_args()
@@ -423,5 +440,7 @@ def main():
     elif args.mode == "hybrid":
         setup_record()
         setup_transcript()
+    elif args.mode == "backup":
+        setup_backup()
 if __name__ == "__main__":
     main()

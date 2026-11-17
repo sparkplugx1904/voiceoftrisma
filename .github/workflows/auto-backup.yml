@@ -1,0 +1,78 @@
+name: 📦 Auto-Backup Archive.org to Hugging Face Dataset
+
+on:
+  schedule:
+    # Berjalan setiap hari pukul 22:00 WITA (14:00 UTC) setelah seluruh siaran & transkripsi hari itu selesai
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+    inputs:
+      batch_size:
+        description: "Jumlah identifier per batch upload (default: 100)"
+        required: false
+        default: "100"
+      max_batches:
+        description: "Batas maksimal batch per run (0 = semua hingga tuntas)"
+        required: false
+        default: "0"
+      identifier:
+        description: "Identifier spesifik Archive.org (kosongkan jika otomatis semua antrean)"
+        required: false
+        default: ""
+      force:
+        description: "Upload ulang meskipun identifier sudah ada di Hugging Face"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: auto-backup-dataset
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: 🚀 Backup Archive to Hugging Face
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Clean Disk Space
+        run: |
+          echo "=== Ruang Disk Sebelum Pembersihan ==="
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift 2>/dev/null || true
+          echo "=== Ruang Disk Setelah Pembersihan ==="
+          df -h /
+
+      - name: Setup Backup Environment
+        run: python3 main/setup.py backup
+
+      - name: Run Auto Backup to Hugging Face
+        env:
+          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+        run: |
+          EXTRA_ARGS=""
+          if [ -n "${{ inputs.identifier }}" ]; then
+            EXTRA_ARGS="$EXTRA_ARGS --identifier ${{ inputs.identifier }}"
+          fi
+          if [ "${{ inputs.force }}" = "true" ]; then
+            EXTRA_ARGS="$EXTRA_ARGS --force"
+          fi
+
+          BATCH_SIZE="${{ inputs.batch_size || '100' }}"
+          MAX_BATCHES="${{ inputs.max_batches || '0' }}"
+
+          python3 -u main/backup.py \
+            --token "$HUGGINGFACE_TOKEN" \
+            --repo-id "Sparkplugx1904/voiceoftrisma" \
+            --batch-size "$BATCH_SIZE" \
+            --max-batches "$MAX_BATCHES" \
+            --workers 10 \
+            $EXTRA_ARGS

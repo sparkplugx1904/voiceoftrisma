@@ -283,9 +283,12 @@ def ensure_model_exists(model_name: str, custom_model_url: Optional[str]) -> Pat
                 pass
 
         log_warn(f"Model standar '{model_name}' belum ada, mengunduh...")
-        url = f"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{model_name}.bin"
+        url = f"https://huggingface.co/Sparkplugx1904/whisper.cpp/resolve/main/ggml-{model_name}.bin"
         if not download_file(url, model_path):
-            log_error("Gagal mengunduh model standar. Membatalkan.", exit_app=True)
+            log_warn("Mencoba fallback unduhan dari upstream ggerganov/whisper.cpp...")
+            fallback_url = f"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{model_name}.bin"
+            if not download_file(fallback_url, model_path):
+                log_error("Gagal mengunduh model standar. Membatalkan.", exit_app=True)
             
         return model_path
 
@@ -355,7 +358,7 @@ def preprocess_audio(input_path: Path, ffmpeg_bin: Path) -> Path:
         log_warn(f"Error saat pra-pemrosesan FFmpeg: {e}. Menggunakan audio asli.")
         return input_path
 
-def transcribe_single_audio(audio_path: Path, model_path: Path, whisper_cli_path: Path, ffmpeg_bin: Path, prompt: Optional[str] = None):
+def transcribe_single_audio(audio_path: Path, model_path: Path, whisper_cli_path: Path, ffmpeg_bin: Path, prompt: Optional[str] = None, max_context: int = 224):
     """Mentranskripsi seluruh file audio tunggal menggunakan whisper.cpp CLI."""
     if not prompt:
         prompt = DEFAULT_PROMPT or load_whisper_prompt()
@@ -395,7 +398,7 @@ def transcribe_single_audio(audio_path: Path, model_path: Path, whisper_cli_path
         "-bo", "5",               # Best of 5 kandidat
         "-bs", "5",               # Beam search (mencegah kesalahan fonetik lokal)
         "-nf",                    # Matikan temperature fallback (cegah loop repetisi)
-        "-mc", "32",              # Batasi context window agar tidak mencemari segmen
+        "-mc", str(max_context),  # Batasi context window (default 224 agar seluruh prompt termuat)
         "-t", n_threads,
         "--no-speech-thold", "0.65", # Tolak segmen hening/musik murni
         "--entropy-thold", "2.40",
@@ -498,6 +501,12 @@ def main():
         default=DEFAULT_PROMPT, 
         help=f"Prompt awal untuk memandu konteks dan kosakata. Default: '{DEFAULT_PROMPT}'"
     )
+    parser.add_argument(
+        "-mc", "--max-context",
+        type=int,
+        default=224,
+        help="Maksimum token text context untuk whisper (default: 224)."
+    )
     
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
@@ -530,7 +539,8 @@ def main():
             model_path=model_path,
             whisper_cli_path=whisper_cli_path,
             ffmpeg_bin=ffmpeg_bin,
-            prompt=args.prompt
+            prompt=args.prompt,
+            max_context=args.max_context
         )
         
     except Exception as e:
