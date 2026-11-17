@@ -69,8 +69,11 @@ jobs:
           BATCH_SIZE="${{ inputs.batch_size || '100' }}"
           MAX_BATCHES="${{ inputs.max_batches || '0' }}"
 
+          # Bersihkan trailing newline / spasi pada token dari secrets
+          CLEAN_TOKEN=$(echo -n "$HUGGINGFACE_TOKEN" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
           python3 -u main/backup.py \
-            --token "$HUGGINGFACE_TOKEN" \
+            --token "$CLEAN_TOKEN" \
             --repo-id "Sparkplugx1904/voiceoftrisma" \
             --batch-size "$BATCH_SIZE" \
             --max-batches "$MAX_BATCHES" \

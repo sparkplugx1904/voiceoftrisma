@@ -443,13 +443,23 @@ def main():
 
     args = parser.parse_args()
 
-    # Validasi token HF
-    token = args.token or os.environ.get("HUGGINGFACE_TOKEN")
+    # Validasi & sanitasi token HF (bersihkan whitespace, \r, \n, dan tanda kutip)
+    raw_token = args.token or os.environ.get("HUGGINGFACE_TOKEN", "")
+    token = raw_token.strip().strip("'\"").strip() if raw_token else ""
     if not token:
         log("[FATAL] HUGGINGFACE_TOKEN tidak ditemukan di argumen maupun environment variable!")
         sys.exit(1)
 
     api = HfApi(token=token)
+
+    # Validasi awal token & akses ke Hugging Face (fail-fast sebelum mengunduh data besar)
+    try:
+        user_info = api.whoami()
+        user_name = user_info.get("name") or user_info.get("fullname") or "authenticated_user"
+        log(f"✓ Berhasil terautentikasi ke Hugging Face sebagai '{user_name}'.")
+    except Exception as e:
+        log(f"[FATAL] Gagal autentikasi ke Hugging Face dengan token yang diberikan: {e}")
+        sys.exit(1)
 
     # 1. Dapatkan daftar identifier
     if args.identifier:
@@ -515,6 +525,9 @@ def main():
                 workers=args.workers,
             )
             batch_results.append(res)
+            if not res.get("upload_success"):
+                log(f"[FATAL] Menghentikan rangkaian backup karena Batch {idx} gagal diunggah.")
+                break
 
     finally:
         # Pembersihan direktori staging induk
@@ -536,7 +549,13 @@ def main():
             batch_results,
         )
 
-    log("🎉 Seluruh rangkaian auto-backup selesai.")
+    # Validasi hasil akhir (fail-fast)
+    has_failed_batches = any(not b.get("upload_success") for b in batch_results)
+    if has_failed_batches:
+        log("[FATAL] Auto-backup berakhir dengan kegagalan pada proses unggah.")
+        sys.exit(1)
+
+    log("🎉 Seluruh rangkaian auto-backup selesai dengan sukses.")
 
 
 if __name__ == "__main__":
