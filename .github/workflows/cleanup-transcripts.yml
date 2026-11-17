@@ -1,0 +1,41 @@
+name: 🗑️ Cleanup Transcripts from Archive.org
+
+on:
+  workflow_dispatch:
+    inputs:
+      workers:
+        description: "Jumlah thread pekerja paralel (default: 8)"
+        required: false
+        default: "8"
+
+concurrency:
+  group: cleanup-transcripts
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: 🗑️ Delete Transcripts from Target Items
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Dependencies
+        run: |
+          pip install --no-cache-dir requests urllib3
+
+      - name: Run Cleanup Script
+        env:
+          IA_ACCESS_KEY: ${{ secrets.IA_ACCESS_KEY }}
+          IA_SECRET_KEY: ${{ secrets.IA_SECRET_KEY }}
+        run: |
+          python3 -u main/delete_transcripts.py \
+            --workers "${{ inputs.workers || '8' }}" \
+            --targets "main/targets_retranscribe.json"
