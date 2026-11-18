@@ -358,6 +358,134 @@ def preprocess_audio(input_path: Path, ffmpeg_bin: Path) -> Path:
         log_warn(f"Error saat pra-pemrosesan FFmpeg: {e}. Menggunakan audio asli.")
         return input_path
 
+HALLUCINATION_PATTERNS = [
+    re.compile(r"sous-titrage", re.IGNORECASE),
+    re.compile(r"sub\s*indo\s*by", re.IGNORECASE),
+    re.compile(r"terima\s*kasih\s*telah\s*menonton", re.IGNORECASE),
+    re.compile(r"thanks\s*for\s*watching", re.IGNORECASE),
+    re.compile(r"photo\s*album", re.IGNORECASE),
+    re.compile(r"never\s*ending\s*midnight\s*sun", re.IGNORECASE),
+    re.compile(r"amara\.org", re.IGNORECASE),
+    re.compile(r"opensubtitles", re.IGNORECASE),
+]
+
+
+def clean_and_finalize_transcripts(
+    temp_srt_path: Path,
+    temp_txt_path: Path,
+    temp_json_path: Path,
+    final_srt_path: Path,
+    final_txt_path: Path,
+    final_json_path: Path,
+):
+    """
+    Menyaring halusinasi, watermark subtitle YouTube, dan teks berulang
+    sebelum menyimpan hasil akhir transcript.srt, transcript.txt, dan transcript.json.
+    """
+    valid_blocks = []
+    clean_lines = []
+
+    # 1. Bersihkan SRT & bangun teks baris yang valid
+    if temp_srt_path.exists():
+        raw_srt = temp_srt_path.read_bytes().decode("utf-8", errors="replace").strip()
+        blocks = re.split(r'\n\s*\n', raw_srt)
+        last_norm = None
+        consecutive_repeats = 0
+        idx = 1
+
+        for b in blocks:
+            lines = [ln.strip() for ln in b.strip().splitlines() if ln.strip()]
+            if len(lines) < 2:
+                continue
+            ts_idx = -1
+            for i, ln in enumerate(lines):
+                if '-->' in ln:
+                    ts_idx = i
+                    break
+            if ts_idx == -1:
+                continue
+
+            ts_line = lines[ts_idx]
+            text = ' '.join(lines[ts_idx + 1:]).strip()
+
+            # Abaikan jika tidak ada karakter alfanumerik
+            if not re.search(r'[a-zA-Z0-9]', text):
+                continue
+
+            # Abaikan pola halusinasi watermark YouTube
+            if any(pat.search(text) for pat in HALLUCINATION_PATTERNS):
+                continue
+
+            norm = re.sub(r'[^a-zA-Z0-9]', '', text.lower())
+            if norm == last_norm:
+                consecutive_repeats += 1
+                if consecutive_repeats >= 1:
+                    continue
+            else:
+                last_norm = norm
+                consecutive_repeats = 0
+
+            valid_blocks.append(f"{idx}\n{ts_line}\n{text}")
+            clean_lines.append(text)
+            idx += 1
+
+        final_srt_path.write_text("\n\n".join(valid_blocks) + "\n", encoding="utf-8")
+        temp_srt_path.unlink()
+        log_success(f"SRT bersih disimpan ke {final_srt_path} ({len(valid_blocks)} segmen).")
+    else:
+        log_warn(f"File SRT output tidak ditemukan: {temp_srt_path}.")
+
+    # 2. Simpan TXT bersih
+    if clean_lines:
+        final_txt_path.write_text("\n".join(clean_lines) + "\n", encoding="utf-8")
+        if temp_txt_path.exists():
+            temp_txt_path.unlink()
+        log_success(f"TXT bersih disimpan ke {final_txt_path}.")
+    elif temp_txt_path.exists():
+        content = temp_txt_path.read_bytes().decode("utf-8", errors="replace").strip()
+        final_txt_path.write_text(content + "\n", encoding="utf-8")
+        temp_txt_path.unlink()
+        log_success(f"TXT disimpan ke {final_txt_path}.")
+    else:
+        log_warn(f"File TXT output tidak ditemukan: {temp_txt_path}.")
+
+    # 3. Bersihkan JSON
+    if temp_json_path.exists():
+        raw_json = temp_json_path.read_bytes().decode("utf-8", errors="replace").strip()
+        try:
+            parsed = json.loads(raw_json)
+            if "transcription" in parsed and isinstance(parsed["transcription"], list):
+                cleaned_transcription = []
+                last_json_norm = None
+                json_repeats = 0
+                for seg in parsed["transcription"]:
+                    seg_text = seg.get("text", "").strip()
+                    if not re.search(r'[a-zA-Z0-9]', seg_text) or "[BLANK_AUDIO]" in seg_text:
+                        continue
+                    if any(pat.search(seg_text) for pat in HALLUCINATION_PATTERNS):
+                        continue
+                    j_norm = re.sub(r'[^a-zA-Z0-9]', '', seg_text.lower())
+                    if j_norm == last_json_norm:
+                        json_repeats += 1
+                        if json_repeats >= 1:
+                            continue
+                    else:
+                        last_json_norm = j_norm
+                        json_repeats = 0
+                    cleaned_transcription.append(seg)
+                parsed["transcription"] = cleaned_transcription
+            pretty = json.dumps(parsed, ensure_ascii=False, indent=2)
+        except json.JSONDecodeError:
+            log_warn("JSON dari whisper-cli tidak valid, disimpan apa adanya.")
+            pretty = raw_json
+
+        final_json_path.write_text(pretty + "\n", encoding="utf-8")
+        temp_json_path.unlink()
+        log_success(f"JSON bersih disimpan ke {final_json_path}.")
+    else:
+        log_warn(f"File JSON output tidak ditemukan: {temp_json_path}.")
+
+
 def transcribe_single_audio(audio_path: Path, model_path: Path, whisper_cli_path: Path, ffmpeg_bin: Path, prompt: Optional[str] = None, max_context: int = 224):
     """Mentranskripsi seluruh file audio tunggal menggunakan whisper.cpp CLI."""
     if not prompt:
@@ -394,16 +522,15 @@ def transcribe_single_audio(audio_path: Path, model_path: Path, whisper_cli_path
         "-m", str(model_path),
         "-f", str(clean_audio_path),
         "--prompt", prompt,
-        "--carry-initial-prompt", # Jaga panduan kata kunci stasiun sepanjang rekaman
-        "-bo", "5",               # Best of 5 kandidat
-        "-bs", "5",               # Beam search (mencegah kesalahan fonetik lokal)
-        "-nf",                    # Matikan temperature fallback (cegah loop repetisi)
-        "-mc", str(max_context),  # Batasi context window (default 224 agar seluruh prompt termuat)
+        "-bo", "1",               # Greedy decoding (hindari local minimum loops)
+        "-bs", "1",               # Beam size 1 untuk kecepatan dan determinisme
+        "-mc", str(max_context),  # Batasi context window
         "-t", n_threads,
-        "--no-speech-thold", "0.65", # Tolak segmen hening/musik murni
+        "--no-speech-thold", "0.75", # Tolak segmen hening/musik radio secara lebih ketat
         "--entropy-thold", "2.40",
         "--logprob-thold", "-1.00",
-        "-sns",                   # Suppress non-speech tokens (lagu/noise)
+        "--suppress-regex", "Sous-titrage|Sub indo|Terima kasih telah menonton|Photo album|Never Ending",
+        "-sns",                   # Suppress non-speech tokens
         "-of", str(output_base_path_temp),
         "-otxt",
         "-osrt",
@@ -412,7 +539,7 @@ def transcribe_single_audio(audio_path: Path, model_path: Path, whisper_cli_path
         "-pp"
     ]
     
-    log_info(f"Menjalankan whisper-cli dengan parameter anti-looping & beam search...")
+    log_info(f"Menjalankan whisper-cli dengan parameter greedy decoding & penekan halusinasi...")
     
     try:
         subprocess.run(cmd, check=True, capture_output=False)
@@ -431,47 +558,15 @@ def transcribe_single_audio(audio_path: Path, model_path: Path, whisper_cli_path
             except Exception:
                 pass
 
-    # Pindahkan TXT
-    try:
-        if temp_txt_file.exists():
-            content = temp_txt_file.read_bytes().decode("utf-8", errors="replace").strip()
-            final_txt.write_text(content, encoding="utf-8")
-            temp_txt_file.unlink()
-            log_success(f"TXT disimpan ke {final_txt}.")
-        else:
-            log_warn(f"File TXT output tidak ditemukan: {temp_txt_file}.")
-    except Exception as e:
-        log_error(f"Gagal memproses file TXT: {e}")
-
-    # Pindahkan SRT
-    try:
-        if temp_srt_file.exists():
-            content = temp_srt_file.read_bytes().decode("utf-8", errors="replace").strip()
-            final_srt.write_text(content, encoding="utf-8")
-            temp_srt_file.unlink()
-            log_success(f"SRT disimpan ke {final_srt}.")
-        else:
-            log_warn(f"File SRT output tidak ditemukan: {temp_srt_file}.")
-    except Exception as e:
-        log_error(f"Gagal memproses file SRT: {e}")
-
-    # Pindahkan JSON (pretty-print agar mudah dibaca)
-    try:
-        if temp_json_file.exists():
-            raw = temp_json_file.read_bytes().decode("utf-8", errors="replace").strip()
-            try:
-                parsed = json.loads(raw)
-                pretty = json.dumps(parsed, ensure_ascii=False, indent=2)
-            except json.JSONDecodeError:
-                log_warn("JSON dari whisper-cli tidak valid, disimpan apa adanya.")
-                pretty = raw
-            final_json.write_text(pretty, encoding="utf-8")
-            temp_json_file.unlink()
-            log_success(f"JSON disimpan ke {final_json}.")
-        else:
-            log_warn(f"File JSON output tidak ditemukan: {temp_json_file}.")
-    except Exception as e:
-        log_error(f"Gagal memproses file JSON: {e}")
+    # Filter dan finalisasi output SRT, TXT, dan JSON
+    clean_and_finalize_transcripts(
+        temp_srt_path=temp_srt_file,
+        temp_txt_path=temp_txt_file,
+        temp_json_path=temp_json_file,
+        final_srt_path=final_srt,
+        final_txt_path=final_txt,
+        final_json_path=final_json
+    )
 
     log_success("Transkripsi selesai.")
 
