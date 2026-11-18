@@ -49,11 +49,14 @@ scratch/
 *.jsonl
 *.srt
 *.wav
+*.mp4
+VOT-Denpasar*
 
 eval_results/
 # --- Downloaded AI Models (Whisper GGML/GGUF) ---
 !models/
 !models/*.bin
+models/ggml-large*.bin
 *.gguf
 
 # --- Native Executables & Local Binaries ---
