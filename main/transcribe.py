@@ -333,6 +333,7 @@ def preprocess_audio(input_path: Path, ffmpeg_bin: Path) -> Path:
         "highpass=f=80,"
         "lowpass=f=7500,"
         "afftdn=nf=-25,"
+        "agate=threshold=0.015:range=0:ratio=10,"
         "loudnorm=I=-16:TP=-1.5:LRA=11"
     )
     
@@ -361,12 +362,18 @@ def preprocess_audio(input_path: Path, ffmpeg_bin: Path) -> Path:
 HALLUCINATION_PATTERNS = [
     re.compile(r"sous-titrage", re.IGNORECASE),
     re.compile(r"sub\s*indo\s*by", re.IGNORECASE),
-    re.compile(r"terima\s*kasih\s*telah\s*menonton", re.IGNORECASE),
+    re.compile(r"terima\s*kasih\s*(telah|sudah)?\s*menonton", re.IGNORECASE),
+    re.compile(r"^\s*terima\s*kasih[\.\!\?]?\s*$", re.IGNORECASE),
     re.compile(r"thanks\s*for\s*watching", re.IGNORECASE),
     re.compile(r"photo\s*album", re.IGNORECASE),
     re.compile(r"never\s*ending\s*midnight\s*sun", re.IGNORECASE),
     re.compile(r"amara\.org", re.IGNORECASE),
     re.compile(r"opensubtitles", re.IGNORECASE),
+    re.compile(r"sampai\s*jumpa\s*di\s*video\s*selanjutnya", re.IGNORECASE),
+    re.compile(r"selamat\s*menikmati", re.IGNORECASE),
+    re.compile(r"jangan\s*lupa\s*like", re.IGNORECASE),
+    re.compile(r"like,\s*comment", re.IGNORECASE),
+    re.compile(r"tonton\s*video\s*selanjutnya", re.IGNORECASE),
 ]
 
 
@@ -486,7 +493,7 @@ def clean_and_finalize_transcripts(
         log_warn(f"File JSON output tidak ditemukan: {temp_json_path}.")
 
 
-def transcribe_single_audio(audio_path: Path, model_path: Path, whisper_cli_path: Path, ffmpeg_bin: Path, prompt: Optional[str] = None, max_context: int = 224):
+def transcribe_single_audio(audio_path: Path, model_path: Path, whisper_cli_path: Path, ffmpeg_bin: Path, prompt: Optional[str] = None, max_context: int = 0):
     """Mentranskripsi seluruh file audio tunggal menggunakan whisper.cpp CLI."""
     if not prompt:
         prompt = DEFAULT_PROMPT or load_whisper_prompt()
@@ -524,12 +531,11 @@ def transcribe_single_audio(audio_path: Path, model_path: Path, whisper_cli_path
         "--prompt", prompt,
         "-bo", "1",               # Greedy decoding (hindari local minimum loops)
         "-bs", "1",               # Beam size 1 untuk kecepatan dan determinisme
-        "-mc", str(max_context),  # Batasi context window
+        "-mc", str(max_context),  # Batasi context window (0 = independent windows, anti-loop)
         "-t", n_threads,
-        "--no-speech-thold", "0.75", # Tolak segmen hening/musik radio secara lebih ketat
+        "--no-speech-thold", "0.50", # Ambang batas deteksi keheningan/musik
         "--entropy-thold", "2.40",
         "--logprob-thold", "-1.00",
-        "--suppress-regex", "Sous-titrage|Sub indo|Terima kasih telah menonton|Photo album|Never Ending",
         "-sns",                   # Suppress non-speech tokens
         "-of", str(output_base_path_temp),
         "-otxt",
@@ -539,7 +545,7 @@ def transcribe_single_audio(audio_path: Path, model_path: Path, whisper_cli_path
         "-pp"
     ]
     
-    log_info(f"Menjalankan whisper-cli dengan parameter greedy decoding & penekan halusinasi...")
+    log_info(f"Menjalankan whisper-cli dengan parameter greedy decoding & anti-looping...")
     
     try:
         subprocess.run(cmd, check=True, capture_output=False)
@@ -599,8 +605,8 @@ def main():
     parser.add_argument(
         "-mc", "--max-context",
         type=int,
-        default=224,
-        help="Maksimum token text context untuk whisper (default: 224)."
+        default=0,
+        help="Maksimum token text context untuk whisper (default: 0 agar jendela 30 detik independen dan anti-looping)."
     )
     
     if len(sys.argv) == 1:
