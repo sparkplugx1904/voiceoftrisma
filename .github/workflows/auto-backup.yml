@@ -2,8 +2,8 @@ name: 📦 Auto-Backup Archive.org to Hugging Face Dataset
 
 on:
   schedule:
-    # Berjalan setiap hari pukul 22:00 WITA (14:00 UTC) setelah seluruh siaran & transkripsi hari itu selesai
-    - cron: "0 14 * * *"
+    # Auto Backup Minguan
+    - cron: "0 14 * * 0"
   workflow_dispatch:
     inputs:
       batch_size:
